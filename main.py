@@ -1,37 +1,38 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Optional
 from supabase_client import get_supabase
 
 app = FastAPI(
     title="Robô Global de Afiliados",
-    description="API para ranking e pontuação de produtos usando Supabase.",
-    version="3.0.0"
+    description="API para ranking, pontuação e monetização global.",
+    version="4.0.0"
 )
 
 supabase = get_supabase()
 
 
-# ---------------------------
+# -----------------------------------
 # MODELO /atualizar
-# ---------------------------
+# -----------------------------------
 class AtualizarPayload(BaseModel):
     id_produto: str
     metrica: str
     valor: float
 
 
-# ---------------------------
+# -----------------------------------
 # /status
-# ---------------------------
+# -----------------------------------
 @app.get("/status")
 def status():
     return {"status": "OK", "supabase": "conectado"}
 
 
-# ---------------------------
+# -----------------------------------
 # /produtos
-# ---------------------------
+# -----------------------------------
 @app.get("/produtos")
 def produtos():
     try:
@@ -41,9 +42,9 @@ def produtos():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ---------------------------
+# -----------------------------------
 # /atualizar
-# ---------------------------
+# -----------------------------------
 @app.post("/atualizar")
 def atualizar(payload: AtualizarPayload):
     try:
@@ -60,16 +61,16 @@ def atualizar(payload: AtualizarPayload):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ---------------------------
+# -----------------------------------
 # /pontuacao
-# ---------------------------
+# -----------------------------------
 @app.get("/pontuacao")
 def pontuacao(id_produto: Optional[str] = None):
     try:
         if not id_produto:
             raise HTTPException(status_code=400, detail="id_produto é obrigatório")
 
-        query = """
+        query = f"""
             SELECT
                 p.id_produto,
                 p.nome,
@@ -77,9 +78,9 @@ def pontuacao(id_produto: Optional[str] = None):
             FROM produtos p
             LEFT JOIN metrica_historico m
                 ON m.id_produto = p.id_produto
-            WHERE p.id_produto = '{}'
+            WHERE p.id_produto = '{id_produto}'
             GROUP BY p.id_produto, p.nome;
-        """.format(id_produto)
+        """
 
         result = supabase.rpc("executar_query", {"query": query}).execute()
         return result.data
@@ -88,9 +89,9 @@ def pontuacao(id_produto: Optional[str] = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ---------------------------
-# /ranking  (CORRIGIDO)
-# ---------------------------
+# -----------------------------------
+# /ranking
+# -----------------------------------
 @app.get("/ranking")
 def ranking():
     try:
@@ -107,11 +108,11 @@ def ranking():
         """
 
         result = supabase.rpc("executar_query", {"query": query}).execute()
+
         dados = result.data
 
         if isinstance(dados, list):
             return dados
-
         if isinstance(dados, dict):
             return [dados]
 
@@ -119,3 +120,69 @@ def ranking():
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# -----------------------------------
+# WIDGET OFICIAL /widget-ranking
+# -----------------------------------
+@app.get("/widget-ranking", response_class=HTMLResponse)
+def widget_ranking():
+    html = """
+    <!DOCTYPE html>
+    <html lang="pt-BR">
+    <head>
+        <meta charset="UTF-8">
+        <title>Ranking – Widget</title>
+        <style>
+            body { font-family: Arial; margin:0; padding:0; background:#fff; }
+            .box { padding:15px; }
+            h2 { text-align:center; color:#222; }
+            table { width:100%; border-collapse:collapse; margin-top:15px; }
+            th { background:#0057ff; color:white; padding:10px; }
+            td { padding:8px; border-bottom:1px solid #eee; text-align:center; }
+            tr:nth-child(even) { background:#f6f6f6; }
+        </style>
+    </head>
+    <body>
+        <div class="box">
+            <h2>🏆 Ranking de Produtos</h2>
+            <table id="rankingTable">
+                <tr>
+                    <th>Pos.</th>
+                    <th>Produto</th>
+                    <th>Pontos</th>
+                </tr>
+            </table>
+        </div>
+
+        <script>
+            async function load() {
+                const resp = await fetch("/ranking");
+                const data = await resp.json();
+                const table = document.getElementById("rankingTable");
+
+                table.innerHTML = `
+                <tr>
+                    <th>Pos.</th>
+                    <th>Produto</th>
+                    <th>Pontos</th>
+                </tr>
+                `;
+
+                data.forEach((item, i) => {
+                    table.innerHTML += `
+                    <tr>
+                        <td>${i+1}º</td>
+                        <td>${item.nome}</td>
+                        <td>${item.pontuacao_total}</td>
+                    </tr>`;
+                });
+            }
+
+            load();
+            setInterval(load, 5000);
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
