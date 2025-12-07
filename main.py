@@ -186,3 +186,52 @@ def widget_ranking():
     </html>
     """
     return HTMLResponse(content=html)
+
+
+# ---------------------------
+# Registrar comissão recebida
+# ---------------------------
+@app.post("/registrar_comissao")
+def registrar_comissao(valor: float, origem: str = "desconhecida"):
+    try:
+        supabase.table("capital_interno").insert({
+            "saldo_atual": valor,
+            "saldo_previsto": 0,
+            "origem": origem,
+            "observacao": "comissão registrada"
+        }).execute()
+
+        return {"status": "OK", "valor_registrado": valor}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------
+# Consultar saldo interno
+# ---------------------------
+@app.get("/capital")
+def capital():
+    try:
+        result = supabase.table("capital_interno").select("*").order("id", desc=True).limit(1).execute()
+
+        if not result.data:
+            return {"saldo_atual": 0, "saldo_previsto": 0}
+
+        return result.data[0]
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------
+# Produtos elegíveis (pagamento rápido)
+# ---------------------------
+@app.get("/produtos_elegiveis")
+def produtos_elegiveis():
+    try:
+        result = supabase.table("produtos_elegiveis").select("*").eq("status", "aprovado").execute()
+        return result.data
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
