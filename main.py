@@ -235,3 +235,46 @@ def produtos_elegiveis():
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/decisao")
+def decisao():
+    try:
+        # Consultar saldo
+        capital = supabase.table("capital_interno").select("*").order("id", desc=True).limit(1).execute()
+        saldo = capital.data[0]["saldo_atual"] if capital.data else 0
+
+        # Consultar produtos elegíveis
+        produtos = supabase.table("produtos_elegiveis").select("*").eq("status", "aprovado").execute()
+        produtos_list = produtos.data
+
+        if not produtos_list:
+            return {"erro": "Nenhum produto elegível encontrado."}
+
+        # Selecionar produto com regra simples inicial (placeholder inteligente)
+        produto = produtos_list[0]
+
+        acao = f"Escalar produto {produto['nome']}"
+        motivo = "Pagamento rápido + Produto elegível"
+        recomendacao = "Aumentar presença deste produto nas estratégias internas de venda."
+
+        # Registrar a decisão
+        supabase.table("decisoes_robo").insert({
+            "produto_id": produto["id_produto"],
+            "produto_nome": produto["nome"],
+            "acao": acao,
+            "motivo": motivo,
+            "capital_disponivel": saldo,
+            "recomendacao": recomendacao
+        }).execute()
+
+        return {
+            "produto": produto,
+            "acao": acao,
+            "motivo": motivo,
+            "capital_disponivel": saldo,
+            "recomendacao": recomendacao
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
