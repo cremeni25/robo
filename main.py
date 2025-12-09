@@ -375,3 +375,64 @@ def analise():
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/escala")
+def escala():
+    try:
+        # Consultar capital interno
+        capital = supabase.table("capital_interno").select("*").order("id", desc=True).limit(1).execute()
+        saldo = capital.data[0]["saldo_atual"] if capital.data else 0
+
+        # Consultar produto elegível
+        produtos = supabase.table("produtos_elegiveis").select("*").eq("status", "aprovado").execute()
+        produto = produtos.data[0] if produtos.data else None
+
+        if not produto:
+            return {"erro": "Nenhum produto elegível disponível para escalar."}
+
+        # Calcular risco
+        risco = "baixo" if saldo > 0 else "alto"
+
+        # ROI previsto simples (primeira versão — será evoluído depois)
+        roi_previsto = 0
+        if produto["pagamento"] == "imediato":
+            roi_previsto = 1.4   # 40% potencial de retorno rápido
+        else:
+            roi_previsto = 1.1   # retorno mais lento
+
+        # Capital projetado
+        capital_projetado = saldo * roi_previsto
+
+        # Definir decisão
+        if risco == "baixo":
+            decisao = f"Escalar imediatamente o produto {produto['nome']}"
+            observacao = "Saldo positivo permite aceleração controlada."
+        else:
+            decisao = f"Não escalar ainda o produto {produto['nome']}"
+            observacao = "É necessário aguardar primeira comissão."
+
+        # Registrar decisão financeira
+        supabase.table("escala_financeira").insert({
+            "produto_id": produto["id_produto"],
+            "produto_nome": produto["nome"],
+            "capital_projetado": capital_projetado,
+            "risco": risco,
+            "roi_previsto": roi_previsto,
+            "decisao": decisao,
+            "observacao": observacao
+        }).execute()
+
+        return {
+            "produto": produto,
+            "capital_atual": saldo,
+            "capital_projetado": capital_projetado,
+            "roi_previsto": roi_previsto,
+            "risco": risco,
+            "decisao": decisao,
+            "observacao": observacao
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
