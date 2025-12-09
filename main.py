@@ -483,3 +483,37 @@ def ciclo():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/resultado")
+def resultado():
+    try:
+        # Último produto analisado
+        produto = supabase.table("produtos_elegiveis").select("*").order("id_produto", desc=True).limit(1).execute()
+        produto_dados = produto.data[0] if produto.data else None
+
+        # Última decisão
+        decisao = supabase.table("decisoes_robo").select("*").order("id", desc=True).limit(1).execute()
+        decisao_dados = decisao.data[0] if decisao.data else None
+
+        # Último plano diário
+        plano = supabase.table("plano_diario").select("*").order("id", desc=True).limit(1).execute()
+        plano_dados = plano.data[0] if plano.data else None
+
+        # Últimos indicadores internos
+        indicadores = supabase.table("indicadores_internos").select("*").order("id", desc=True).limit(1).execute()
+        indicadores_dados = indicadores.data[0] if indicadores.data else None
+
+        # Último ciclo completo
+        ciclo = supabase.table("ciclos_robo").select("*").order("id", desc=True).limit(1).execute()
+        ciclo_dados = ciclo.data[0] if ciclo.data else None
+
+        return {
+            "produto": produto_dados,
+            "decisao": decisao_dados,
+            "plano": plano_dados,
+            "indicadores": indicadores_dados,
+            "ciclo": ciclo_dados
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
