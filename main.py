@@ -1,40 +1,59 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Optional
 from supabase_client import get_supabase
 
+
+# =========================================================
+#  CONFIGURAÇÃO PRINCIPAL DA API (ÚNICO app = FastAPI)
+# =========================================================
 app = FastAPI(
     title="Robô Global de Afiliados",
-    description="API para ranking, pontuação e monetização global.",
-    version="4.1.0"
+    description="API para ranking, pontuação e monetização global usando Supabase.",
+    version="4.1.0",
 )
 
+# --- CORS LIBERADO PARA O DASHBOARD EM GITHUB PAGES ---
+origins = [
+    "https://cremeni25.github.io",
+    "https://cremeni25.github.io/robo-global-dashboard",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Conexão única com o Supabase
 supabase = get_supabase()
 
 
-# -----------------------------------
-# MODELO /atualizar
-# -----------------------------------
+# =========================================================
+#  MODELOS
+# =========================================================
 class AtualizarPayload(BaseModel):
     id_produto: str
     metrica: str
     valor: float
 
 
-# -----------------------------------
-# /status
-# -----------------------------------
+# =========================================================
+#  ENDPOINTS BÁSICOS
+# =========================================================
 @app.get("/status")
 def status():
+    """Status simples da API e conexão com Supabase."""
     return {"status": "OK", "supabase": "conectado"}
 
 
-# -----------------------------------
-# /produtos
-# -----------------------------------
 @app.get("/produtos")
 def produtos():
+    """Lista todos os produtos cadastrados."""
     try:
         result = supabase.table("produtos").select("*").execute()
         return result.data
@@ -42,30 +61,24 @@ def produtos():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# -----------------------------------
-# /atualizar
-# -----------------------------------
 @app.post("/atualizar")
 def atualizar(payload: AtualizarPayload):
+    """Registra uma nova métrica numérica para um produto."""
     try:
         data = {
             "id_produto": payload.id_produto,
             "metrica": payload.metrica,
-            "valor": payload.valor
+            "valor": payload.valor,
         }
-
         result = supabase.table("metrica_historico").insert(data).execute()
         return {"status": "OK", "inserido": result.data}
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# -----------------------------------
-# /pontuacao
-# -----------------------------------
 @app.get("/pontuacao")
 def pontuacao(id_produto: Optional[str] = None):
+    """Pontuação consolidada de um produto específico."""
     try:
         if not id_produto:
             raise HTTPException(status_code=400, detail="id_produto é obrigatório")
@@ -84,16 +97,13 @@ def pontuacao(id_produto: Optional[str] = None):
 
         result = supabase.rpc("executar_query", {"query": query}).execute()
         return result.data
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# -----------------------------------
-# /ranking
-# -----------------------------------
 @app.get("/ranking")
 def ranking():
+    """Ranking global de produtos por pontuação acumulada."""
     try:
         query = """
             SELECT
@@ -108,25 +118,23 @@ def ranking():
         """
 
         result = supabase.rpc("executar_query", {"query": query}).execute()
-
         dados = result.data
 
         if isinstance(dados, list):
             return dados
         if isinstance(dados, dict):
             return [dados]
-
         return []
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# -----------------------------------
-# WIDGET OFICIAL /widget-ranking
-# -----------------------------------
+# =========================================================
+#  WIDGET OFICIAL /widget-ranking
+# =========================================================
 @app.get("/widget-ranking", response_class=HTMLResponse)
 def widget_ranking():
+    """Widget HTML simples para embutir o ranking em outras páginas."""
     html = """
     <!DOCTYPE html>
     <html lang="pt-BR">
@@ -134,9 +142,9 @@ def widget_ranking():
         <meta charset="UTF-8">
         <title>Ranking – Widget</title>
         <style>
-            body { font-family: Arial; margin:0; padding:0; background:#fff; }
+            body { font-family: Arial, sans-serif; margin:0; padding:0; background:#ffffff; }
             .box { padding:15px; }
-            h2 { text-align:center; color:#222; }
+            h2 { text-align:center; color:#222; margin-bottom:10px; }
             table { width:100%; border-collapse:collapse; margin-top:15px; }
             th { background:#0057ff; color:white; padding:10px; }
             td { padding:8px; border-bottom:1px solid #eee; text-align:center; }
@@ -188,67 +196,85 @@ def widget_ranking():
     return HTMLResponse(content=html)
 
 
-# -----------------------------------
-# Registrar comissão recebida
-# -----------------------------------
+# =========================================================
+#  CAPITAL E COMISSÕES
+# =========================================================
 @app.post("/registrar_comissao")
 def registrar_comissao(valor: float, origem: str = "desconhecida"):
+    """Registra uma comissão recebida no capital interno."""
     try:
         supabase.table("capital_interno").insert({
             "saldo_atual": valor,
             "saldo_previsto": 0,
             "origem": origem,
-            "observacao": "comissão registrada"
+            "observacao": "comissão registrada",
         }).execute()
 
         return {"status": "OK", "valor_registrado": valor}
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# -----------------------------------
-# Consultar saldo interno
-# -----------------------------------
 @app.get("/capital")
 def capital():
+    """Retorna o último registro de saldo interno."""
     try:
-        result = supabase.table("capital_interno").select("*").order("id", desc=True).limit(1).execute()
+        result = (
+            supabase.table("capital_interno")
+            .select("*")
+            .order("id", desc=True)
+            .limit(1)
+            .execute()
+        )
 
         if not result.data:
             return {"saldo_atual": 0, "saldo_previsto": 0}
 
         return result.data[0]
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# -----------------------------------
-# Produtos elegíveis (pagamento rápido)
-# -----------------------------------
+# =========================================================
+#  PRODUTOS ELEGÍVEIS
+# =========================================================
 @app.get("/produtos_elegiveis")
 def produtos_elegiveis():
+    """Retorna produtos elegíveis (pagamento rápido, aprovados)."""
     try:
-        result = supabase.table("produtos_elegiveis").select("*").eq("status", "aprovado").execute()
+        result = (
+            supabase.table("produtos_elegiveis")
+            .select("*")
+            .eq("status", "aprovado")
+            .execute()
+        )
         return result.data
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# -----------------------------------
-# Decisão automática do robô
-# -----------------------------------
+# =========================================================
+#  DECISÃO DO ROBÔ
+# =========================================================
 @app.get("/decisao")
 def decisao():
+    """Decisão automática do robô baseada em capital e produtos elegíveis."""
     try:
-        # Consultar saldo
-        capital = supabase.table("capital_interno").select("*").order("id", desc=True).limit(1).execute()
+        capital = (
+            supabase.table("capital_interno")
+            .select("*")
+            .order("id", desc=True)
+            .limit(1)
+            .execute()
+        )
         saldo = capital.data[0]["saldo_atual"] if capital.data else 0
 
-        # Consultar produtos elegíveis
-        produtos = supabase.table("produtos_elegiveis").select("*").eq("status", "aprovado").execute()
+        produtos = (
+            supabase.table("produtos_elegiveis")
+            .select("*")
+            .eq("status", "aprovado")
+            .execute()
+        )
         produtos_list = produtos.data
 
         if not produtos_list:
@@ -258,16 +284,17 @@ def decisao():
 
         acao = f"Escalar produto {produto['nome']}"
         motivo = "Pagamento rápido + Produto elegível"
-        recomendacao = "Aumentar presença deste produto nas estratégias internas de venda."
+        recomendacao = (
+            "Aumentar presença deste produto nas estratégias internas de venda."
+        )
 
-        # Registrar decisão (ajuste o nome da tabela se seu SQL criou outro)
         supabase.table("decisoes_robo").insert({
             "produto_id": produto["id_produto"],
             "produto_nome": produto["nome"],
             "acao": acao,
             "motivo": motivo,
             "capital_disponivel": saldo,
-            "recomendacao": recomendacao
+            "recomendacao": recomendacao,
         }).execute()
 
         return {
@@ -275,25 +302,34 @@ def decisao():
             "acao": acao,
             "motivo": motivo,
             "capital_disponivel": saldo,
-            "recomendacao": recomendacao
+            "recomendacao": recomendacao,
         }
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# -----------------------------------
-# Plano diário automático
-# -----------------------------------
+# =========================================================
+#  PLANO DIÁRIO
+# =========================================================
 @app.get("/plano-diario")
 def plano_diario():
+    """Gera um plano diário simples baseado em capital e produto elegível."""
     try:
-        # Saldo atual
-        capital = supabase.table("capital_interno").select("*").order("id", desc=True).limit(1).execute()
+        capital = (
+            supabase.table("capital_interno")
+            .select("*")
+            .order("id", desc=True)
+            .limit(1)
+            .execute()
+        )
         saldo = capital.data[0]["saldo_atual"] if capital.data else 0
 
-        # Produtos elegíveis
-        produtos = supabase.table("produtos_elegiveis").select("*").eq("status", "aprovado").execute()
+        produtos = (
+            supabase.table("produtos_elegiveis")
+            .select("*")
+            .eq("status", "aprovado")
+            .execute()
+        )
         produtos_list = produtos.data
 
         if not produtos_list:
@@ -303,16 +339,19 @@ def plano_diario():
 
         acao = f"Priorizar divulgação do produto {produto['nome']}"
         prioridade = "alta" if saldo > 0 else "baixa"
-        observacao = "Utilizar saldo interno disponível" if saldo > 0 else "Aguardando primeira comissão para aumentar ritmo"
+        observacao = (
+            "Utilizar saldo interno disponível"
+            if saldo > 0
+            else "Aguardando primeira comissão para aumentar ritmo"
+        )
 
-        # Registrar plano diário
         supabase.table("plano_diario").insert({
             "produto_id": produto["id_produto"],
             "produto_nome": produto["nome"],
             "capital_disponivel": saldo,
             "acao": acao,
             "prioridade": prioridade,
-            "observacao": observacao
+            "observacao": observacao,
         }).execute()
 
         return {
@@ -320,40 +359,61 @@ def plano_diario():
             "capital_disponivel": saldo,
             "acao": acao,
             "prioridade": prioridade,
-            "observacao": observacao
+            "observacao": observacao,
         }
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# -----------------------------------
-# Análise estratégica interna
-# -----------------------------------
+# =========================================================
+#  ANÁLISE E INDICADORES INTERNOS
+# =========================================================
 @app.get("/analise")
 def analise():
+    """Análise interna consolidando capital, produto, plano e decisão."""
     try:
-        # Capital interno
-        capital = supabase.table("capital_interno").select("*").order("id", desc=True).limit(1).execute()
+        capital = (
+            supabase.table("capital_interno")
+            .select("*")
+            .order("id", desc=True)
+            .limit(1)
+            .execute()
+        )
         saldo = capital.data[0]["saldo_atual"] if capital.data else 0
 
-        # Produto elegível
-        produtos = supabase.table("produtos_elegiveis").select("*").eq("status", "aprovado").execute()
+        produtos = (
+            supabase.table("produtos_elegiveis")
+            .select("*")
+            .eq("status", "aprovado")
+            .execute()
+        )
         produto = produtos.data[0] if produtos.data else None
 
-        # Plano diário
-        plano = supabase.table("plano_diario").select("*").order("id", desc=True).limit(1).execute()
+        plano = (
+            supabase.table("plano_diario")
+            .select("*")
+            .order("id", desc=True)
+            .limit(1)
+            .execute()
+        )
         plano_texto = plano.data[0]["acao"] if plano.data else "Sem plano registrado"
 
-        # Decisão do robô
-        decisao_reg = supabase.table("decisoes_robo").select("*").order("id", desc=True).limit(1).execute()
-        decisao_texto = decisao_reg.data[0]["acao"] if decisao_reg.data else "Sem decisão registrada"
+        decisao_reg = (
+            supabase.table("decisoes_robo")
+            .select("*")
+            .order("id", desc=True)
+            .limit(1)
+            .execute()
+        )
+        decisao_texto = (
+            decisao_reg.data[0]["acao"] if decisao_reg.data else "Sem decisão registrada"
+        )
 
-        # Risco simples baseado no capital
         risco = "baixo" if saldo > 0 else "alto"
-        recomendacao = "Acelerar divulgação" if saldo > 0 else "Aguardar primeira comissão"
+        recomendacao = (
+            "Acelerar divulgação" if saldo > 0 else "Aguardar primeira comissão"
+        )
 
-        # Registrar indicadores internos
         supabase.table("indicadores_internos").insert({
             "produto_id": produto["id_produto"] if produto else None,
             "produto_nome": produto["nome"] if produto else None,
@@ -361,7 +421,7 @@ def analise():
             "decisao": decisao_texto,
             "plano": plano_texto,
             "risco": risco,
-            "recomendacao": recomendacao
+            "recomendacao": recomendacao,
         }).execute()
 
         return {
@@ -370,41 +430,48 @@ def analise():
             "decisao": decisao_texto,
             "plano": plano_texto,
             "risco": risco,
-            "recomendacao": recomendacao
+            "recomendacao": recomendacao,
         }
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# =========================================================
+#  ESCALA FINANCEIRA
+# =========================================================
 @app.get("/escala")
 def escala():
+    """Decisão de escala baseada em capital, risco e ROI previsto."""
     try:
-        # Consultar capital interno
-        capital = supabase.table("capital_interno").select("*").order("id", desc=True).limit(1).execute()
+        capital = (
+            supabase.table("capital_interno")
+            .select("*")
+            .order("id", desc=True)
+            .limit(1)
+            .execute()
+        )
         saldo = capital.data[0]["saldo_atual"] if capital.data else 0
 
-        # Consultar produto elegível
-        produtos = supabase.table("produtos_elegiveis").select("*").eq("status", "aprovado").execute()
+        produtos = (
+            supabase.table("produtos_elegiveis")
+            .select("*")
+            .eq("status", "aprovado")
+            .execute()
+        )
         produto = produtos.data[0] if produtos.data else None
 
         if not produto:
             return {"erro": "Nenhum produto elegível disponível para escalar."}
 
-        # Calcular risco
         risco = "baixo" if saldo > 0 else "alto"
 
-        # ROI previsto simples (primeira versão — será evoluído depois)
-        roi_previsto = 0
-        if produto["pagamento"] == "imediato":
-            roi_previsto = 1.4   # 40% potencial de retorno rápido
+        if produto.get("pagamento") == "imediato":
+            roi_previsto = 1.4
         else:
-            roi_previsto = 1.1   # retorno mais lento
+            roi_previsto = 1.1
 
-        # Capital projetado
         capital_projetado = saldo * roi_previsto
 
-        # Definir decisão
         if risco == "baixo":
             decisao = f"Escalar imediatamente o produto {produto['nome']}"
             observacao = "Saldo positivo permite aceleração controlada."
@@ -412,7 +479,6 @@ def escala():
             decisao = f"Não escalar ainda o produto {produto['nome']}"
             observacao = "É necessário aguardar primeira comissão."
 
-        # Registrar decisão financeira
         supabase.table("escala_financeira").insert({
             "produto_id": produto["id_produto"],
             "produto_nome": produto["nome"],
@@ -420,7 +486,7 @@ def escala():
             "risco": risco,
             "roi_previsto": roi_previsto,
             "decisao": decisao,
-            "observacao": observacao
+            "observacao": observacao,
         }).execute()
 
         return {
@@ -430,98 +496,125 @@ def escala():
             "roi_previsto": roi_previsto,
             "risco": risco,
             "decisao": decisao,
-            "observacao": observacao
+            "observacao": observacao,
         }
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# =========================================================
+#  CICLO COMPLETO
+# =========================================================
 @app.get("/ciclo")
 def ciclo():
+    """Executa um ciclo completo: decisão, plano, análise e escala."""
     try:
-        # 1 — Executar DECISÃO
         decisao_resp = decisao()
         decisao_texto = decisao_resp["acao"]
         produto_nome = decisao_resp["produto"]["nome"]
 
-        # 2 — Executar PLANO DIÁRIO
         plano_resp = plano_diario()
         plano_texto = plano_resp["acao"]
 
-        # 3 — Executar ANÁLISE
         analise_resp = analise()
-        capital = analise_resp["capital"]
-        risco = analise_resp["risco"]
+        capital_valor = analise_resp["capital"]
+        risco_valor = analise_resp["risco"]
 
-        # 4 — Executar ESCALA
         escala_resp = escala()
         escala_texto = escala_resp["decisao"]
 
-        # 5 — Registrar ciclo completo
         supabase.table("ciclos_robo").insert({
             "produto_nome": produto_nome,
             "decisao": decisao_texto,
             "plano": plano_texto,
-            "capital": capital,
-            "risco": risco,
-            "escala": escala_texto
+            "capital": capital_valor,
+            "risco": risco_valor,
+            "escala": escala_texto,
         }).execute()
 
-        # 6 — Retorno consolidado
         return {
             "produto": produto_nome,
             "decisao": decisao_texto,
             "plano": plano_texto,
-            "capital": capital,
-            "risco": risco,
+            "capital": capital_valor,
+            "risco": risco_valor,
             "escala": escala_texto,
-            "status": "Ciclo executado com sucesso"
+            "status": "Ciclo executado com sucesso",
         }
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# =========================================================
+#  RESULTADO CONSOLIDADO
+# =========================================================
 @app.get("/resultado")
 def resultado():
+    """Retorna o último estado consolidado do robô."""
     try:
-        # Último produto analisado
-        produto = supabase.table("produtos_elegiveis").select("*").order("id_produto", desc=True).limit(1).execute()
+        produto = (
+            supabase.table("produtos_elegiveis")
+            .select("*")
+            .order("id_produto", desc=True)
+            .limit(1)
+            .execute()
+        )
         produto_dados = produto.data[0] if produto.data else None
 
-        # Última decisão
-        decisao = supabase.table("decisoes_robo").select("*").order("id", desc=True).limit(1).execute()
-        decisao_dados = decisao.data[0] if decisao.data else None
+        decisao_reg = (
+            supabase.table("decisoes_robo")
+            .select("*")
+            .order("id", desc=True)
+            .limit(1)
+            .execute()
+        )
+        decisao_dados = decisao_reg.data[0] if decisao_reg.data else None
 
-        # Último plano diário
-        plano = supabase.table("plano_diario").select("*").order("id", desc=True).limit(1).execute()
+        plano = (
+            supabase.table("plano_diario")
+            .select("*")
+            .order("id", desc=True)
+            .limit(1)
+            .execute()
+        )
         plano_dados = plano.data[0] if plano.data else None
 
-        # Últimos indicadores internos
-        indicadores = supabase.table("indicadores_internos").select("*").order("id", desc=True).limit(1).execute()
+        indicadores = (
+            supabase.table("indicadores_internos")
+            .select("*")
+            .order("id", desc=True)
+            .limit(1)
+            .execute()
+        )
         indicadores_dados = indicadores.data[0] if indicadores.data else None
 
-        # Último ciclo completo
-        ciclo = supabase.table("ciclos_robo").select("*").order("id", desc=True).limit(1).execute()
-        ciclo_dados = ciclo.data[0] if ciclo.data else None
+        ciclo_reg = (
+            supabase.table("ciclos_robo")
+            .select("*")
+            .order("id", desc=True)
+            .limit(1)
+            .execute()
+        )
+        ciclo_dados = ciclo_reg.data[0] if ciclo_reg.data else None
 
         return {
             "produto": produto_dados,
             "decisao": decisao_dados,
             "plano": plano_dados,
             "indicadores": indicadores_dados,
-            "ciclo": ciclo_dados
+            "ciclo": ciclo_dados,
         }
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# =========================================================
+#  LOOP DIÁRIO
+# =========================================================
 @app.get("/loop-diario")
 def loop_diario(qtd: int = 1):
     """
-    Executa o ciclo completo do robô (decisão, plano, análise, escala)
+    Executa o ciclo completo do robô (decisão, plano, análise, escala).
     'qtd' define quantas vezes o ciclo será executado neste disparo.
     """
     try:
@@ -536,10 +629,7 @@ def loop_diario(qtd: int = 1):
         return {
             "execucoes": len(resultados),
             "resultados": resultados,
-            "status": "Loop diário executado com sucesso"
+            "status": "Loop diário executado com sucesso",
         }
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
