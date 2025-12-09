@@ -278,3 +278,46 @@ def decisao():
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/plano-diario")
+def plano_diario():
+    try:
+        # Saldo atual
+        capital = supabase.table("capital_interno").select("*").order("id", desc=True).limit(1).execute()
+        saldo = capital.data[0]["saldo_atual"] if capital.data else 0
+
+        # Produtos elegíveis
+        produtos = supabase.table("produtos_elegiveis").select("*").eq("status", "aprovado").execute()
+        produtos_list = produtos.data
+
+        if not produtos_list:
+            return {"erro": "Nenhum produto elegível disponível."}
+
+        produto = produtos_list[0]
+
+        # Geração do plano diário
+        acao = f"Priorizar divulgação do produto {produto['nome']}"
+        prioridade = "alta" if saldo > 0 else "baixa"
+        observacao = "Utilizar saldo interno disponível" if saldo > 0 else "Aguardando primeira comissão para aumentar ritmo"
+
+        # Registrar no banco
+        supabase.table("plano_diario").insert({
+            "produto_id": produto["id_produto"],
+            "produto_nome": produto["nome"],
+            "capital_disponivel": saldo,
+            "acao": acao,
+            "prioridade": prioridade,
+            "observacao": observacao
+        }).execute()
+
+        return {
+            "produto": produto,
+            "capital_disponivel": saldo,
+            "acao": acao,
+            "prioridade": prioridade,
+            "observacao": observacao
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
