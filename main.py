@@ -517,3 +517,29 @@ def resultado():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.get("/loop-diario")
+def loop_diario(qtd: int = 1):
+    """
+    Executa o ciclo completo do robô (decisão, plano, análise, escala)
+    'qtd' define quantas vezes o ciclo será executado neste disparo.
+    """
+    try:
+        if qtd < 1:
+            qtd = 1
+
+        resultados = []
+        for _ in range(qtd):
+            res = ciclo()
+            resultados.append(res)
+
+        return {
+            "execucoes": len(resultados),
+            "resultados": resultados,
+            "status": "Loop diário executado com sucesso"
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
