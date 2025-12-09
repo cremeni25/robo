@@ -436,3 +436,50 @@ def escala():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.get("/ciclo")
+def ciclo():
+    try:
+        # 1 — Executar DECISÃO
+        decisao_resp = decisao()
+        decisao_texto = decisao_resp["acao"]
+        produto_nome = decisao_resp["produto"]["nome"]
+
+        # 2 — Executar PLANO DIÁRIO
+        plano_resp = plano_diario()
+        plano_texto = plano_resp["acao"]
+
+        # 3 — Executar ANÁLISE
+        analise_resp = analise()
+        capital = analise_resp["capital"]
+        risco = analise_resp["risco"]
+
+        # 4 — Executar ESCALA
+        escala_resp = escala()
+        escala_texto = escala_resp["decisao"]
+
+        # 5 — Registrar ciclo completo
+        supabase.table("ciclos_robo").insert({
+            "produto_nome": produto_nome,
+            "decisao": decisao_texto,
+            "plano": plano_texto,
+            "capital": capital,
+            "risco": risco,
+            "escala": escala_texto
+        }).execute()
+
+        # 6 — Retorno consolidado
+        return {
+            "produto": produto_nome,
+            "decisao": decisao_texto,
+            "plano": plano_texto,
+            "capital": capital,
+            "risco": risco,
+            "escala": escala_texto,
+            "status": "Ciclo executado com sucesso"
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
