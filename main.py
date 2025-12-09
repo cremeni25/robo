@@ -319,5 +319,51 @@ def plano_diario():
             "observacao": observacao
         }
 
+
+    @app.get("/analise")
+def analise():
+    try:
+        # Capital interno
+        capital = supabase.table("capital_interno").select("*").order("id", desc=True).limit(1).execute()
+        saldo = capital.data[0]["saldo_atual"] if capital.data else 0
+
+        # Produto elegível
+        produtos = supabase.table("produtos_elegiveis").select("*").eq("status", "aprovado").execute()
+        produto = produtos.data[0] if produtos.data else None
+
+        # Plano diário
+        plano = supabase.table("plano_diario").select("*").order("id", desc=True).limit(1).execute()
+        plano_texto = plano.data[0]["acao"] if plano.data else "Sem plano registrado"
+
+        # Decisão do robô
+        decisao = supabase.table("decisoes_robo").select("*").order("id", desc=True).limit(1).execute()
+        decisao_texto = decisao.data[0]["acao"] if decisao.data else "Sem decisão registrada"
+
+        # Risco simples baseado no capital
+        risco = "baixo" if saldo > 0 else "alto"
+
+        recomendacao = "Acelerar divulgação" if saldo > 0 else "Aguardar primeira comissão"
+
+        # Registrar indicadores
+        supabase.table("indicadores_internos").insert({
+            "produto_id": produto["id_produto"] if produto else None,
+            "produto_nome": produto["nome"] if produto else None,
+            "capital": saldo,
+            "decisao": decisao_texto,
+            "plano": plano_texto,
+            "risco": risco,
+            "recomendacao": recomendacao
+        }).execute()
+
+        return {
+            "produto": produto,
+            "capital": saldo,
+            "decisao": decisao_texto,
+            "plano": plano_texto,
+            "risco": risco,
+            "recomendacao": recomendacao
+        }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
