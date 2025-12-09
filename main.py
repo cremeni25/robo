@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Optional
@@ -7,7 +7,7 @@ from supabase_client import get_supabase
 app = FastAPI(
     title="Robô Global de Afiliados",
     description="API para ranking, pontuação e monetização global.",
-    version="4.0.0"
+    version="4.1.0"
 )
 
 supabase = get_supabase()
@@ -188,9 +188,9 @@ def widget_ranking():
     return HTMLResponse(content=html)
 
 
-# ---------------------------
+# -----------------------------------
 # Registrar comissão recebida
-# ---------------------------
+# -----------------------------------
 @app.post("/registrar_comissao")
 def registrar_comissao(valor: float, origem: str = "desconhecida"):
     try:
@@ -207,9 +207,9 @@ def registrar_comissao(valor: float, origem: str = "desconhecida"):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ---------------------------
+# -----------------------------------
 # Consultar saldo interno
-# ---------------------------
+# -----------------------------------
 @app.get("/capital")
 def capital():
     try:
@@ -224,9 +224,9 @@ def capital():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ---------------------------
+# -----------------------------------
 # Produtos elegíveis (pagamento rápido)
-# ---------------------------
+# -----------------------------------
 @app.get("/produtos_elegiveis")
 def produtos_elegiveis():
     try:
@@ -237,6 +237,9 @@ def produtos_elegiveis():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# -----------------------------------
+# Decisão automática do robô
+# -----------------------------------
 @app.get("/decisao")
 def decisao():
     try:
@@ -251,14 +254,13 @@ def decisao():
         if not produtos_list:
             return {"erro": "Nenhum produto elegível encontrado."}
 
-        # Selecionar produto com regra simples inicial (placeholder inteligente)
         produto = produtos_list[0]
 
         acao = f"Escalar produto {produto['nome']}"
         motivo = "Pagamento rápido + Produto elegível"
         recomendacao = "Aumentar presença deste produto nas estratégias internas de venda."
 
-        # Registrar a decisão
+        # Registrar decisão (ajuste o nome da tabela se seu SQL criou outro)
         supabase.table("decisoes_robo").insert({
             "produto_id": produto["id_produto"],
             "produto_nome": produto["nome"],
@@ -280,6 +282,9 @@ def decisao():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# -----------------------------------
+# Plano diário automático
+# -----------------------------------
 @app.get("/plano-diario")
 def plano_diario():
     try:
@@ -296,12 +301,11 @@ def plano_diario():
 
         produto = produtos_list[0]
 
-        # Geração do plano diário
         acao = f"Priorizar divulgação do produto {produto['nome']}"
         prioridade = "alta" if saldo > 0 else "baixa"
         observacao = "Utilizar saldo interno disponível" if saldo > 0 else "Aguardando primeira comissão para aumentar ritmo"
 
-        # Registrar no banco
+        # Registrar plano diário
         supabase.table("plano_diario").insert({
             "produto_id": produto["id_produto"],
             "produto_nome": produto["nome"],
@@ -319,7 +323,13 @@ def plano_diario():
             "observacao": observacao
         }
 
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
+
+# -----------------------------------
+# Análise estratégica interna
+# -----------------------------------
 @app.get("/analise")
 def analise():
     try:
@@ -336,8 +346,8 @@ def analise():
         plano_texto = plano.data[0]["acao"] if plano.data else "Sem plano registrado"
 
         # Decisão do robô
-        decisao = supabase.table("decisoes_robo").select("*").order("id", desc=True).limit(1).execute()
-        decisao_texto = decisao.data[0]["acao"] if decisao.data else "Sem decisão registrada"
+        decisao_reg = supabase.table("decisoes_robo").select("*").order("id", desc=True).limit(1).execute()
+        decisao_texto = decisao_reg.data[0]["acao"] if decisao_reg.data else "Sem decisão registrada"
 
         # Risco simples baseado no capital
         risco = "baixo" if saldo > 0 else "alto"
