@@ -320,7 +320,7 @@ def plano_diario():
         }
 
 
-    @app.get("/analise")
+@app.get("/analise")
 def analise():
     try:
         # Capital interno
@@ -341,10 +341,9 @@ def analise():
 
         # Risco simples baseado no capital
         risco = "baixo" if saldo > 0 else "alto"
-
         recomendacao = "Acelerar divulgação" if saldo > 0 else "Aguardar primeira comissão"
 
-        # Registrar indicadores
+        # Registrar indicadores internos
         supabase.table("indicadores_internos").insert({
             "produto_id": produto["id_produto"] if produto else None,
             "produto_nome": produto["nome"] if produto else None,
@@ -366,4 +365,3 @@ def analise():
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
