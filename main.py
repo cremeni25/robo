@@ -1,9 +1,11 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Optional
 from supabase_client import get_supabase
+from datetime import datetime
+import os
 
 
 # =========================================================
@@ -47,23 +49,20 @@ class AtualizarPayload(BaseModel):
 # =========================================================
 @app.get("/status")
 def status():
-    """Status simples da API e conexão com Supabase."""
     return {"status": "OK", "supabase": "conectado"}
 
 
 @app.get("/produtos")
 def produtos():
-    """Lista todos os produtos cadastrados."""
     try:
         result = supabase.table("produtos").select("*").execute()
         return result.data
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, str(e))
 
 
 @app.post("/atualizar")
 def atualizar(payload: AtualizarPayload):
-    """Registra uma nova métrica numérica para um produto."""
     try:
         data = {
             "id_produto": payload.id_produto,
@@ -73,15 +72,14 @@ def atualizar(payload: AtualizarPayload):
         result = supabase.table("metrica_historico").insert(data).execute()
         return {"status": "OK", "inserido": result.data}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, str(e))
 
 
 @app.get("/pontuacao")
 def pontuacao(id_produto: Optional[str] = None):
-    """Pontuação consolidada de um produto específico."""
     try:
         if not id_produto:
-            raise HTTPException(status_code=400, detail="id_produto é obrigatório")
+            raise HTTPException(400, "id_produto é obrigatório")
 
         query = f"""
             SELECT
@@ -98,12 +96,11 @@ def pontuacao(id_produto: Optional[str] = None):
         result = supabase.rpc("executar_query", {"query": query}).execute()
         return result.data
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, str(e))
 
 
 @app.get("/ranking")
 def ranking():
-    """Ranking global de produtos por pontuação acumulada."""
     try:
         query = """
             SELECT
@@ -126,7 +123,7 @@ def ranking():
             return [dados]
         return []
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, str(e))
 
 
 # =========================================================
@@ -134,7 +131,6 @@ def ranking():
 # =========================================================
 @app.get("/widget-ranking", response_class=HTMLResponse)
 def widget_ranking():
-    """Widget HTML simples para embutir o ranking em outras páginas."""
     html = """
     <!DOCTYPE html>
     <html lang="pt-BR">
@@ -201,7 +197,6 @@ def widget_ranking():
 # =========================================================
 @app.post("/registrar_comissao")
 def registrar_comissao(valor: float, origem: str = "desconhecida"):
-    """Registra uma comissão recebida no capital interno."""
     try:
         supabase.table("capital_interno").insert({
             "saldo_atual": valor,
@@ -212,12 +207,11 @@ def registrar_comissao(valor: float, origem: str = "desconhecida"):
 
         return {"status": "OK", "valor_registrado": valor}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, str(e))
 
 
 @app.get("/capital")
 def capital():
-    """Retorna o último registro de saldo interno."""
     try:
         result = (
             supabase.table("capital_interno")
@@ -232,7 +226,7 @@ def capital():
 
         return result.data[0]
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, str(e))
 
 
 # =========================================================
@@ -240,7 +234,6 @@ def capital():
 # =========================================================
 @app.get("/produtos_elegiveis")
 def produtos_elegiveis():
-    """Retorna produtos elegíveis (pagamento rápido, aprovados)."""
     try:
         result = (
             supabase.table("produtos_elegiveis")
@@ -250,7 +243,7 @@ def produtos_elegiveis():
         )
         return result.data
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, str(e))
 
 
 # =========================================================
@@ -258,7 +251,6 @@ def produtos_elegiveis():
 # =========================================================
 @app.get("/decisao")
 def decisao():
-    """Decisão automática do robô baseada em capital e produtos elegíveis."""
     try:
         capital = (
             supabase.table("capital_interno")
@@ -284,9 +276,7 @@ def decisao():
 
         acao = f"Escalar produto {produto['nome']}"
         motivo = "Pagamento rápido + Produto elegível"
-        recomendacao = (
-            "Aumentar presença deste produto nas estratégias internas de venda."
-        )
+        recomendacao = "Aumentar presença deste produto internamente."
 
         supabase.table("decisoes_robo").insert({
             "produto_id": produto["id_produto"],
@@ -305,7 +295,59 @@ def decisao():
             "recomendacao": recomendacao,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, str(e))
+
+
+# =========================================================
+#  WEBHOOK OFICIAL KIWIFY (NOVO)
+# =========================================================
+@app.post("/webhook/kiwify")
+async def webhook_kiwify(request: Request):
+    """
+    Recebe eventos em tempo real da Kiwify:
+    - sale.approved
+    - sale.refunded
+    """
+    try:
+        payload = await request.json()
+        evento = payload.get("event")
+        dados = payload.get("data", {})
+
+        metricas = []
+
+        # Evento de venda aprovada
+        if evento == "sale.approved":
+            metricas.append(("taxa_aprovacao_pagamento", 1))
+            metricas.append(("velocidade_media_pagamento_horas", 1))
+            metricas.append(("media_conversao_checkout", 1))
+
+            produto_id = dados.get("product_id")
+
+            # Registrar venda
+            if produto_id:
+                supabase.table("vendas").insert({
+                    "produto_id": produto_id,
+                    "valor": dados.get("total_price", 0),
+                    "data": datetime.utcnow().isoformat()
+                }).execute()
+
+        # Evento de reembolso
+        if evento == "sale.refunded":
+            metricas.append(("taxa_reembolso", 1))
+
+        # Persistir métricas
+        for nome, valor in metricas:
+            supabase.table("metricas_plataforma").insert({
+                "plataforma": "kiwify",
+                "nome_metrica": nome,
+                "valor": valor,
+                "atualizado_em": datetime.utcnow().isoformat()
+            }).execute()
+
+        return {"status": "ok"}
+
+    except Exception as e:
+        raise HTTPException(500, str(e))
 
 
 # =========================================================
@@ -313,7 +355,6 @@ def decisao():
 # =========================================================
 @app.get("/plano-diario")
 def plano_diario():
-    """Gera um plano diário simples baseado em capital e produto elegível."""
     try:
         capital = (
             supabase.table("capital_interno")
@@ -337,13 +378,9 @@ def plano_diario():
 
         produto = produtos_list[0]
 
-        acao = f"Priorizar divulgação do produto {produto['nome']}"
+        acao = f"Priorizar divulgação do produto {produto['nombre']}"
         prioridade = "alta" if saldo > 0 else "baixa"
-        observacao = (
-            "Utilizar saldo interno disponível"
-            if saldo > 0
-            else "Aguardando primeira comissão para aumentar ritmo"
-        )
+        observacao = "Usar capital interno" if saldo > 0 else "Aguardar comissão"
 
         supabase.table("plano_diario").insert({
             "produto_id": produto["id_produto"],
@@ -362,15 +399,14 @@ def plano_diario():
             "observacao": observacao,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, str(e))
 
 
 # =========================================================
-#  ANÁLISE E INDICADORES INTERNOS
+#  ANALISE
 # =========================================================
 @app.get("/analise")
 def analise():
-    """Análise interna consolidando capital, produto, plano e decisão."""
     try:
         capital = (
             supabase.table("capital_interno")
@@ -396,7 +432,7 @@ def analise():
             .limit(1)
             .execute()
         )
-        plano_texto = plano.data[0]["acao"] if plano.data else "Sem plano registrado"
+        plano_texto = plano.data[0]["acao"] if plano.data else "Sem plano"
 
         decisao_reg = (
             supabase.table("decisoes_robo")
@@ -406,13 +442,11 @@ def analise():
             .execute()
         )
         decisao_texto = (
-            decisao_reg.data[0]["acao"] if decisao_reg.data else "Sem decisão registrada"
+            decisao_reg.data[0]["acao"] if decisao_reg.data else "Sem decisão"
         )
 
         risco = "baixo" if saldo > 0 else "alto"
-        recomendacao = (
-            "Acelerar divulgação" if saldo > 0 else "Aguardar primeira comissão"
-        )
+        recomendacao = "Acelerar" if saldo > 0 else "Aguardar"
 
         supabase.table("indicadores_internos").insert({
             "produto_id": produto["id_produto"] if produto else None,
@@ -433,15 +467,14 @@ def analise():
             "recomendacao": recomendacao,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, str(e))
 
 
 # =========================================================
-#  ESCALA FINANCEIRA
+#  ESCALA
 # =========================================================
 @app.get("/escala")
 def escala():
-    """Decisão de escala baseada em capital, risco e ROI previsto."""
     try:
         capital = (
             supabase.table("capital_interno")
@@ -461,23 +494,23 @@ def escala():
         produto = produtos.data[0] if produtos.data else None
 
         if not produto:
-            return {"erro": "Nenhum produto elegível disponível para escalar."}
+            return {"erro": "Nenhum produto elegível disponível."}
 
         risco = "baixo" if saldo > 0 else "alto"
-
-        if produto.get("pagamento") == "imediato":
-            roi_previsto = 1.4
-        else:
-            roi_previsto = 1.1
-
+        roi_previsto = 1.4 if produto.get("pagamento") == "imediato" else 1.1
         capital_projetado = saldo * roi_previsto
 
-        if risco == "baixo":
-            decisao = f"Escalar imediatamente o produto {produto['nome']}"
-            observacao = "Saldo positivo permite aceleração controlada."
-        else:
-            decisao = f"Não escalar ainda o produto {produto['nome']}"
-            observacao = "É necessário aguardar primeira comissão."
+        decisao = (
+            f"Escalar imediatamente o produto {produto['nome']}"
+            if risco == "baixo"
+            else f"Não escalar ainda o produto {produto['nome']}"
+        )
+
+        observacao = (
+            "Saldo positivo permite aceleração."
+            if risco == "baixo"
+            else "Aguardar primeira comissão."
+        )
 
         supabase.table("escala_financeira").insert({
             "produto_id": produto["id_produto"],
@@ -499,15 +532,14 @@ def escala():
             "observacao": observacao,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, str(e))
 
 
 # =========================================================
-#  CICLO COMPLETO
+#  CICLO
 # =========================================================
 @app.get("/ciclo")
 def ciclo():
-    """Executa um ciclo completo: decisão, plano, análise e escala."""
     try:
         decisao_resp = decisao()
         decisao_texto = decisao_resp["acao"]
@@ -542,15 +574,14 @@ def ciclo():
             "status": "Ciclo executado com sucesso",
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, str(e))
 
 
 # =========================================================
-#  RESULTADO CONSOLIDADO
+#  RESULTADO
 # =========================================================
 @app.get("/resultado")
 def resultado():
-    """Retorna o último estado consolidado do robô."""
     try:
         produto = (
             supabase.table("produtos_elegiveis")
@@ -605,7 +636,7 @@ def resultado():
             "ciclo": ciclo_dados,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, str(e))
 
 
 # =========================================================
@@ -613,10 +644,6 @@ def resultado():
 # =========================================================
 @app.get("/loop-diario")
 def loop_diario(qtd: int = 1):
-    """
-    Executa o ciclo completo do robô (decisão, plano, análise, escala).
-    'qtd' define quantas vezes o ciclo será executado neste disparo.
-    """
     try:
         if qtd < 1:
             qtd = 1
@@ -632,4 +659,4 @@ def loop_diario(qtd: int = 1):
             "status": "Loop diário executado com sucesso",
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, str(e))
