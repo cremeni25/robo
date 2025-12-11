@@ -276,7 +276,7 @@ def decisao():
 
         acao = f"Escalar produto {produto['nome']}"
         motivo = "Pagamento rápido + Produto elegível"
-        recomendacao = "Aumentar presença deste produto internamente."
+        recomendacao = "Aumentar presença deste produto nas estratégias internas de venda."
 
         supabase.table("decisoes_robo").insert({
             "produto_id": produto["id_produto"],
@@ -299,15 +299,10 @@ def decisao():
 
 
 # =========================================================
-#  WEBHOOK OFICIAL KIWIFY (NOVO)
+#  WEBHOOK OFICIAL KIWIFY
 # =========================================================
 @app.post("/webhook/kiwify")
 async def webhook_kiwify(request: Request):
-    """
-    Recebe eventos em tempo real da Kiwify:
-    - sale.approved
-    - sale.refunded
-    """
     try:
         payload = await request.json()
         evento = payload.get("event")
@@ -315,7 +310,6 @@ async def webhook_kiwify(request: Request):
 
         metricas = []
 
-        # Evento de venda aprovada
         if evento == "sale.approved":
             metricas.append(("taxa_aprovacao_pagamento", 1))
             metricas.append(("velocidade_media_pagamento_horas", 1))
@@ -323,7 +317,6 @@ async def webhook_kiwify(request: Request):
 
             produto_id = dados.get("product_id")
 
-            # Registrar venda
             if produto_id:
                 supabase.table("vendas").insert({
                     "produto_id": produto_id,
@@ -331,11 +324,9 @@ async def webhook_kiwify(request: Request):
                     "data": datetime.utcnow().isoformat()
                 }).execute()
 
-        # Evento de reembolso
         if evento == "sale.refunded":
             metricas.append(("taxa_reembolso", 1))
 
-        # Persistir métricas
         for nome, valor in metricas:
             supabase.table("metricas_plataforma").insert({
                 "plataforma": "kiwify",
@@ -378,9 +369,13 @@ def plano_diario():
 
         produto = produtos_list[0]
 
-        acao = f"Priorizar divulgação do produto {produto['nombre']}"
+        acao = f"Priorizar divulgação do produto {produto['nome']}"
         prioridade = "alta" if saldo > 0 else "baixa"
-        observacao = "Usar capital interno" if saldo > 0 else "Aguardar comissão"
+        observacao = (
+            "Utilizar saldo interno disponível"
+            if saldo > 0
+            else "Aguardando primeira comissão para aumentar ritmo"
+        )
 
         supabase.table("plano_diario").insert({
             "produto_id": produto["id_produto"],
@@ -403,7 +398,7 @@ def plano_diario():
 
 
 # =========================================================
-#  ANALISE
+#  ANÁLISE E INDICADORES INTERNOS
 # =========================================================
 @app.get("/analise")
 def analise():
@@ -432,7 +427,7 @@ def analise():
             .limit(1)
             .execute()
         )
-        plano_texto = plano.data[0]["acao"] if plano.data else "Sem plano"
+        plano_texto = plano.data[0]["acao"] if plano.data else "Sem plano registrado"
 
         decisao_reg = (
             supabase.table("decisoes_robo")
@@ -442,11 +437,13 @@ def analise():
             .execute()
         )
         decisao_texto = (
-            decisao_reg.data[0]["acao"] if decisao_reg.data else "Sem decisão"
+            decisao_reg.data[0]["acao"] if decisao_reg.data else "Sem decisão registrada"
         )
 
         risco = "baixo" if saldo > 0 else "alto"
-        recomendacao = "Acelerar" if saldo > 0 else "Aguardar"
+        recomendacao = (
+            "Acelerar divulgação" if saldo > 0 else "Aguardar primeira comissão"
+        )
 
         supabase.table("indicadores_internos").insert({
             "produto_id": produto["id_produto"] if produto else None,
@@ -471,7 +468,7 @@ def analise():
 
 
 # =========================================================
-#  ESCALA
+#  ESCALA FINANCEIRA
 # =========================================================
 @app.get("/escala")
 def escala():
@@ -494,23 +491,23 @@ def escala():
         produto = produtos.data[0] if produtos.data else None
 
         if not produto:
-            return {"erro": "Nenhum produto elegível disponível."}
+            return {"erro": "Nenhum produto elegível disponível para escalar."}
 
         risco = "baixo" if saldo > 0 else "alto"
-        roi_previsto = 1.4 if produto.get("pagamento") == "imediato" else 1.1
+
+        if produto.get("pagamento") == "imediato":
+            roi_previsto = 1.4
+        else:
+            roi_previsto = 1.1
+
         capital_projetado = saldo * roi_previsto
 
-        decisao = (
-            f"Escalar imediatamente o produto {produto['nome']}"
-            if risco == "baixo"
-            else f"Não escalar ainda o produto {produto['nome']}"
-        )
-
-        observacao = (
-            "Saldo positivo permite aceleração."
-            if risco == "baixo"
-            else "Aguardar primeira comissão."
-        )
+        if risco == "baixo":
+            decisao = f"Escalar imediatamente o produto {produto['nome']}"
+            observacao = "Saldo positivo permite aceleração controlada."
+        else:
+            decisao = f"Não escalar ainda o produto {produto['nome']}"
+            observacao = "É necessário aguardar primeira comissão."
 
         supabase.table("escala_financeira").insert({
             "produto_id": produto["id_produto"],
@@ -536,7 +533,67 @@ def escala():
 
 
 # =========================================================
-#  CICLO
+#  ROI AUTOMÁTICO  (NOVO — POSIÇÃO CONFIRMADA)
+# =========================================================
+@app.get("/roi/{id_produto}")
+def calcular_roi(id_produto: str):
+    try:
+        produto = (
+            supabase.table("monetizacao_produtos")
+            .select("*")
+            .eq("id_produto", id_produto)
+            .execute()
+        )
+
+        if not produto.data:
+            raise HTTPException(404, "Produto não encontrado")
+
+        prod = produto.data[0]
+
+        preco = prod.get("preco", 0)
+        ticket = prod.get("ticket_medio", 0)
+        comissao = prod.get("comissao_media", 0)
+        risco = prod.get("risco", "médio")
+        pagamento = prod.get("velocidade_pagamento", "normal")
+
+        roi = (ticket * comissao) / preco if preco > 0 else 0
+
+        if pagamento == "imediato":
+            roi *= 1.05
+
+        if risco == "alto":
+            roi *= 0.97
+
+        reemb = (
+            supabase.table("metricas_plataforma")
+            .select("valor")
+            .eq("plataforma", "kiwify")
+            .eq("nome_metrica", "taxa_reembolso")
+            .order("atualizado_em", desc=True)
+            .limit(1)
+            .execute()
+        )
+
+        if reemb.data:
+            taxa = float(reemb.data[0]["valor"])
+            roi *= (1 - (taxa * 1.5))
+
+        supabase.table("monetizacao_produtos").update({
+            "roi_previsto": roi
+        }).eq("id_produto", id_produto).execute()
+
+        return {
+            "id_produto": id_produto,
+            "roi_previsto": roi,
+            "status": "ROI calculado e atualizado"
+        }
+
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+# =========================================================
+#  CICLO COMPLETO
 # =========================================================
 @app.get("/ciclo")
 def ciclo():
@@ -578,7 +635,7 @@ def ciclo():
 
 
 # =========================================================
-#  RESULTADO
+#  RESULTADO CONSOLIDADO
 # =========================================================
 @app.get("/resultado")
 def resultado():
