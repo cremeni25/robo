@@ -1,3 +1,4 @@
+# main.py — Robô Global de Afiliados (versão consolidada final)
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
@@ -37,9 +38,9 @@ supabase = get_supabase()
 # =========================================================
 #  CONFIGURAÇÕES OPERACIONAIS (AJUSTÁVEIS)
 # =========================================================
-ROI_MINIMO = 1.2
-CAPITAL_MINIMO_PARA_ESCALA = 10.0
-COOLDOWN_HORAS = 1
+ROI_MINIMO = float(os.getenv("ROI_MINIMO", "1.2"))
+CAPITAL_MINIMO_PARA_ESCALA = float(os.getenv("CAPITAL_MINIMO_PARA_ESCALA", "10.0"))
+COOLDOWN_HORAS = int(os.getenv("COOLDOWN_HORAS", "1"))
 
 # Webhook secret (env)
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
@@ -53,26 +54,93 @@ class AtualizarPayload(BaseModel):
     valor: float
 
 # =========================================================
-#  UTILITÁRIOS (DE MAPEAMENTO E PADRONIZAÇÃO)
+#  UTILITÁRIOS
+# =========================================================
+def agora_iso():
+    return datetime.utcnow().isoformat()
+
+# =========================================================
+#  COMPLIANCE (Protocolo Imutável)
+# =========================================================
+REGRAS_COMPLIANCE = {
+    "spam": [
+        "whatsapp", "telegram", "mensagem em massa", "disparo em massa",
+        "envio em massa", "lista de transmissão", "enviar para todos"
+    ],
+    "proibido_prometer_resultado": [
+        "garantido", "garantia de resultado", "resultados garantidos",
+        "ganhe", "lucre rápido", "dinheiro fácil", "fique rico rápido"
+    ],
+    "marcas_proibidas": [
+        "hotmart", "kiwify", "eduzz", "monetizze", "digistore",
+        "clickbank", "impact", "awin", "amazon", "aliexpress", "ebay"
+    ]
+}
+
+
+def verificar_compliance(texto: str) -> dict:
+    """
+    Verifica se um conteúdo viola qualquer regra ética.
+    Retorna status e motivo da violação (se houver).
+    """
+    if not texto:
+        return {"status": "ok", "motivo": None}
+
+    texto_lower = texto.lower()
+
+    # SPAM
+    for termo in REGRAS_COMPLIANCE["spam"]:
+        if termo in texto_lower:
+            return {"status": "violado", "motivo": f"Spam detectado: {termo}"}
+
+    # PROMESSAS ILEGAIS
+    for termo in REGRAS_COMPLIANCE["proibido_prometer_resultado"]:
+        if termo in texto_lower:
+            return {"status": "violado", "motivo": f"Promessa ilegal detectada: {termo}"}
+
+    # USO INDEVIDO DE MARCAS
+    for termo in REGRAS_COMPLIANCE["marcas_proibidas"]:
+        if termo in texto_lower:
+            return {"status": "violado", "motivo": f"Uso indevido de marca detectado: {termo}"}
+
+    return {"status": "ok", "motivo": None}
+
+
+@app.post("/compliance")
+def compliance_check(conteudo: str):
+    """
+    Endpoint oficial para validar textos e estratégias do Robô.
+    Retorna se o conteúdo está em conformidade ética.
+    """
+    try:
+        resultado = verificar_compliance(conteudo)
+        return resultado
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# =========================================================
+#  MAPEAMENTO E PADRONIZAÇÃO DE WEBHOOKS (WebHook Universal)
 # =========================================================
 def identificar_plataforma(payload: Dict[str, Any], headers: Dict[str, Any]) -> str:
     """
     Identifica a plataforma a partir do payload ou headers.
-    Ordem: evidência explícita -> padrões conhecidos.
     """
-    # Headers-based hints
-    if headers.get("X-KIWIFY-SIGN") or ("event" in payload and "data" in payload):
-        return "kiwify"
-    if headers.get("X-HOTMART-SIGN") or "hotmart" in json.dumps(payload).lower():
-        return "hotmart"
-    if headers.get("X-EDUZZ-SIGN") or "eduzz" in json.dumps(payload).lower():
-        return "eduzz"
-    if "monetizze" in json.dumps(payload).lower() or "prod" in payload:
-        return "monetizze"
-    if "clickbank" in json.dumps(payload).lower() or "transactionType" in payload:
-        return "clickbank"
-    if "digistore" in json.dumps(payload).lower() or "eventType" in payload:
-        return "digistore"
+    try:
+        # Headers-based hints
+        if headers.get("X-KIWIFY-SIGN") or ("event" in payload and "data" in payload):
+            return "kiwify"
+        if headers.get("X-HOTMART-SIGN") or "hotmart" in json.dumps(payload).lower():
+            return "hotmart"
+        if headers.get("X-EDUZZ-SIGN") or "eduzz" in json.dumps(payload).lower():
+            return "eduzz"
+        if "monetizze" in json.dumps(payload).lower() or "prod" in payload:
+            return "monetizze"
+        if "clickbank" in json.dumps(payload).lower() or "transactionType" in payload:
+            return "clickbank"
+        if "digistore" in json.dumps(payload).lower() or "eventType" in payload:
+            return "digistore"
+    except Exception:
+        pass
     # fallback
     return "unknown"
 
@@ -111,7 +179,6 @@ def mapear_evento_plataforma(plataforma: str, payload: Dict[str, Any]) -> Dict[s
             return out
 
         if plataforma == "hotmart":
-            # exemplo genérico
             evt = payload.get("event") or payload.get("notification_type") or payload.get("type")
             data = payload.get("product") or payload
             out["produto_id"] = data.get("product_id") or data.get("productId") or data.get("id")
@@ -213,7 +280,7 @@ def persistir_evento_padronizado(plataforma: str, evento: Dict[str, Any]):
                 "produto_id": pid,
                 "valor": valor or 0,
                 "plataforma": plataforma,
-                "data": datetime.utcnow().isoformat(),
+                "data": agora_iso(),
                 "raw": evento.get("raw")
             }).execute()
         except Exception:
@@ -226,7 +293,7 @@ def persistir_evento_padronizado(plataforma: str, evento: Dict[str, Any]):
                 "plataforma": plataforma,
                 "nome_metrica": "taxa_aprovacao_pagamento",
                 "valor": 1,
-                "atualizado_em": datetime.utcnow().isoformat()
+                "atualizado_em": agora_iso()
             }).execute()
 
         if tipo == "venda_reembolsada":
@@ -234,7 +301,7 @@ def persistir_evento_padronizado(plataforma: str, evento: Dict[str, Any]):
                 "plataforma": plataforma,
                 "nome_metrica": "taxa_reembolso",
                 "valor": 1,
-                "atualizado_em": datetime.utcnow().isoformat()
+                "atualizado_em": agora_iso()
             }).execute()
 
         # ticket médio e comissão se vierem
@@ -243,7 +310,7 @@ def persistir_evento_padronizado(plataforma: str, evento: Dict[str, Any]):
                 "plataforma": plataforma,
                 "nome_metrica": "ticket_medio",
                 "valor": ticket,
-                "atualizado_em": datetime.utcnow().isoformat()
+                "atualizado_em": agora_iso()
             }).execute()
 
         if comissao:
@@ -251,13 +318,13 @@ def persistir_evento_padronizado(plataforma: str, evento: Dict[str, Any]):
                 "plataforma": plataforma,
                 "nome_metrica": "comissao_media",
                 "valor": comissao,
-                "atualizado_em": datetime.utcnow().isoformat()
+                "atualizado_em": agora_iso()
             }).execute()
     except Exception:
         pass
 
 # =========================================================
-#  ENDPOINTS BÁSICOS (mantidos)
+#  ENDPOINTS BÁSICOS
 # =========================================================
 @app.get("/status")
 def status():
@@ -266,32 +333,36 @@ def status():
 
 @app.get("/produtos")
 def produtos():
+    """Lista todos os produtos cadastrados."""
     try:
         result = supabase.table("produtos").select("*").execute()
         return result.data
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/atualizar")
 def atualizar(payload: AtualizarPayload):
+    """Registra uma nova métrica numérica para um produto."""
     try:
         data = {
             "id_produto": payload.id_produto,
             "metrica": payload.metrica,
             "valor": payload.valor,
+            "created_at": agora_iso()
         }
         result = supabase.table("metrica_historico").insert(data).execute()
         return {"status": "OK", "inserido": result.data}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/pontuacao")
 def pontuacao(id_produto: Optional[str] = None):
+    """Pontuação consolidada de um produto específico."""
     try:
         if not id_produto:
-            raise HTTPException(400, "id_produto é obrigatório")
+            raise HTTPException(status_code=400, detail="id_produto é obrigatório")
 
         query = f"""
             SELECT
@@ -308,11 +379,12 @@ def pontuacao(id_produto: Optional[str] = None):
         result = supabase.rpc("executar_query", {"query": query}).execute()
         return result.data
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/ranking")
 def ranking():
+    """Ranking global de produtos por pontuação acumulada."""
     try:
         query = """
             SELECT
@@ -335,94 +407,99 @@ def ranking():
             return [dados]
         return []
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # =========================================================
-#  WIDGET (mantido)
+#  WIDGET OFICIAL /widget-ranking
 # =========================================================
 @app.get("/widget-ranking", response_class=HTMLResponse)
 def widget_ranking():
+    """Widget HTML simples para embutir o ranking em outras páginas."""
     html = """
     <!DOCTYPE html>
     <html lang="pt-BR">
     <head>
         <meta charset="UTF-8">
         <title>Ranking – Widget</title>
-    ...
+        <style>
+            body { font-family: Arial, sans-serif; margin:0; padding:0; background:#ffffff; }
+            .box { padding:15px; }
+            h2 { text-align:center; color:#222; margin-bottom:10px; }
+            table { width:100%; border-collapse:collapse; margin-top:15px; }
+            th { background:#0057ff; color:white; padding:10px; }
+            td { padding:8px; border-bottom:1px solid #eee; text-align:center; }
+            tr:nth-child(even) { background:#f6f6f6; }
+        </style>
+    </head>
+    <body>
+        <div class="box">
+            <h2>🏆 Ranking de Produtos</h2>
+            <table id="rankingTable">
+                <tr>
+                    <th>Pos.</th>
+                    <th>Produto</th>
+                    <th>Pontos</th>
+                </tr>
+            </table>
+        </div>
+
+        <script>
+            async function load() {
+                const resp = await fetch("/ranking");
+                const data = await resp.json();
+                const table = document.getElementById("rankingTable");
+
+                table.innerHTML = `
+                <tr>
+                    <th>Pos.</th>
+                    <th>Produto</th>
+                    <th>Pontos</th>
+                </tr>
+                `;
+
+                data.forEach((item, i) => {
+                    table.innerHTML += `
+                    <tr>
+                        <td>${i+1}º</td>
+                        <td>${item.nome}</td>
+                        <td>${item.pontuacao_total}</td>
+                    </tr>`;
+                });
+            }
+
+            load();
+            setInterval(load, 5000);
+        </script>
+    </body>
     </html>
     """
     return HTMLResponse(content=html)
 
 
 # =========================================================
-#  WEBHOOK UNIVERSAL (SUBSTITUI TODOS OS WEBHOOKS INDIVIDUAIS)
-# =========================================================
-@app.post("/webhook/universal")
-async def webhook_universal(request: Request):
-    """
-    Webhook Universal:
-    - exige header X-ROBO-SECRET == WEBHOOK_SECRET
-    - autodetecta a plataforma
-    - mapeia e padroniza
-    - persiste vendas e métricas padronizadas
-    - retorna 200/401 conforme validação
-    """
-    # autenticação simples por segredo universal
-    header_secret = request.headers.get("X-ROBO-SECRET", "")
-    if not WEBHOOK_SECRET or header_secret != WEBHOOK_SECRET:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-    try:
-        body = await request.body()
-        try:
-            payload = json.loads(body.decode("utf-8")) if body else {}
-        except Exception:
-            # tentar como form-data ou texto
-            payload = {}
-
-        headers = dict(request.headers)
-        plataforma = identificar_plataforma(payload, headers)
-
-        mapped = mapear_evento_plataforma(plataforma, payload)
-        persistir_evento_padronizado(plataforma, mapped)
-
-        # opcional: atualizar ROI do produto se product_id vier
-        pid = mapped.get("produto_id")
-        if pid:
-            try:
-                calcular_roi(pid)
-            except Exception:
-                pass
-
-        return {"status": "ok", "plataforma": plataforma, "evento": mapped.get("tipo_evento")}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-
-# =========================================================
-#  CAPITAL / PRODUTOS / DECISÕES / ESCALA ETC. (mantidos)
+#  CAPITAL E COMISSÕES
 # =========================================================
 @app.post("/registrar_comissao")
 def registrar_comissao(valor: float, origem: str = "desconhecida"):
+    """Registra uma comissão recebida no capital interno."""
     try:
         supabase.table("capital_interno").insert({
             "saldo_atual": valor,
             "saldo_previsto": 0,
             "origem": origem,
             "observacao": "comissão registrada",
-            "created_at": datetime.utcnow().isoformat()
+            "created_at": agora_iso()
         }).execute()
 
         return {"status": "OK", "valor_registrado": valor}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/capital")
 def capital():
+    """Retorna o último registro de saldo interno."""
     try:
         result = (
             supabase.table("capital_interno")
@@ -437,11 +514,15 @@ def capital():
 
         return result.data[0]
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 
+# =========================================================
+#  PRODUTOS ELEGÍVEIS
+# =========================================================
 @app.get("/produtos_elegiveis")
 def produtos_elegiveis():
+    """Retorna produtos elegíveis (pagamento rápido, aprovados)."""
     try:
         result = (
             supabase.table("produtos_elegiveis")
@@ -451,11 +532,15 @@ def produtos_elegiveis():
         )
         return result.data
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 
+# =========================================================
+#  DECISÃO DO ROBÔ
+# =========================================================
 @app.get("/decisao")
 def decisao():
+    """Decisão automática do robô baseada em capital e produtos elegíveis."""
     try:
         capital = (
             supabase.table("capital_interno")
@@ -490,7 +575,7 @@ def decisao():
             "motivo": motivo,
             "capital_disponivel": saldo,
             "recomendacao": recomendacao,
-            "created_at": datetime.utcnow().isoformat()
+            "created_at": agora_iso()
         }).execute()
 
         return {
@@ -501,11 +586,141 @@ def decisao():
             "recomendacao": recomendacao,
         }
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # =========================================================
-#  ROI (mantido)
+#  PLANO DIÁRIO
+# =========================================================
+@app.get("/plano-diario")
+def plano_diario():
+    """Gera um plano diário simples baseado em capital e produto elegível."""
+    try:
+        capital = (
+            supabase.table("capital_interno")
+            .select("*")
+            .order("id", desc=True)
+            .limit(1)
+            .execute()
+        )
+        saldo = capital.data[0]["saldo_atual"] if capital.data else 0
+
+        produtos = (
+            supabase.table("produtos_elegiveis")
+            .select("*")
+            .eq("status", "aprovado")
+            .execute()
+        )
+        produtos_list = produtos.data
+
+        if not produtos_list:
+            return {"erro": "Nenhum produto elegível disponível."}
+
+        produto = produtos_list[0]
+
+        acao = f"Priorizar divulgação do produto {produto['nome']}"
+        prioridade = "alta" if saldo > 0 else "baixa"
+        observacao = (
+            "Utilizar saldo interno disponível"
+            if saldo > 0
+            else "Aguardando primeira comissão para aumentar ritmo"
+        )
+
+        supabase.table("plano_diario").insert({
+            "produto_id": produto["id_produto"],
+            "produto_nome": produto["nome"],
+            "capital_disponivel": saldo,
+            "acao": acao,
+            "prioridade": prioridade,
+            "observacao": observacao,
+            "created_at": agora_iso()
+        }).execute()
+
+        return {
+            "produto": produto,
+            "capital_disponivel": saldo,
+            "acao": acao,
+            "prioridade": prioridade,
+            "observacao": observacao,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =========================================================
+#  ANÁLISE E INDICADORES INTERNOS
+# =========================================================
+@app.get("/analise")
+def analise():
+    """Análise interna consolidando capital, produto, plano e decisão."""
+    try:
+        capital = (
+            supabase.table("capital_interno")
+            .select("*")
+            .order("id", desc=True)
+            .limit(1)
+            .execute()
+        )
+        saldo = capital.data[0]["saldo_atual"] if capital.data else 0
+
+        produtos = (
+            supabase.table("produtos_elegiveis")
+            .select("*")
+            .eq("status", "aprovado")
+            .execute()
+        )
+        produto = produtos.data[0] if produtos.data else None
+
+        plano = (
+            supabase.table("plano_diario")
+            .select("*")
+            .order("id", desc=True)
+            .limit(1)
+            .execute()
+        )
+        plano_texto = plano.data[0]["acao"] if plano.data else "Sem plano registrado"
+
+        decisao_reg = (
+            supabase.table("decisoes_robo")
+            .select("*")
+            .order("id", desc=True)
+            .limit(1)
+            .execute()
+        )
+        decisao_texto = (
+            decisao_reg.data[0]["acao"] if decisao_reg.data else "Sem decisão registrada"
+        )
+
+        risco = "baixo" if saldo > 0 else "alto"
+        recomendacao = (
+            "Acelerar divulgação" if saldo > 0 else "Aguardar primeira comissão"
+        )
+
+        supabase.table("indicadores_internos").insert({
+            "produto_id": produto["id_produto"] if produto else None,
+            "produto_nome": produto["nome"] if produto else None,
+            "capital": saldo,
+            "decisao": decisao_texto,
+            "plano": plano_texto,
+            "risco": risco,
+            "recomendacao": recomendacao,
+            "created_at": agora_iso()
+        }).execute()
+
+        return {
+            "produto": produto,
+            "capital": saldo,
+            "decisao": decisao_texto,
+            "plano": plano_texto,
+            "risco": risco,
+            "recomendacao": recomendacao,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =========================================================
+#  ROI (utilitário)
 # =========================================================
 @app.get("/roi/{id_produto}")
 def calcular_roi(id_produto: str):
@@ -518,13 +733,13 @@ def calcular_roi(id_produto: str):
         )
 
         if not produto.data:
-            raise HTTPException(404, "Produto não encontrado")
+            raise HTTPException(status_code=404, detail="Produto não encontrado")
 
         prod = produto.data[0]
 
-        preco = prod.get("preco", 0)
-        ticket = prod.get("ticket_medio", 0)
-        comissao = prod.get("comissao_media", 0)
+        preco = prod.get("preco", 0) or 0
+        ticket = prod.get("ticket_medio", 0) or 0
+        comissao = prod.get("comissao_media", 0) or 0
         risco = prod.get("risco", "médio")
         pagamento = prod.get("velocidade_pagamento", "normal")
 
@@ -539,19 +754,21 @@ def calcular_roi(id_produto: str):
         reemb = (
             supabase.table("metricas_plataforma")
             .select("valor")
-            .eq("plataforma", "kiwify")
-            .eq("nome_metrica", "taxa_reembolso")
             .order("atualizado_em", desc=True)
             .limit(1)
             .execute()
         )
 
         if reemb.data:
-            taxa = float(reemb.data[0]["valor"])
-            roi *= (1 - (taxa * 1.5))
+            try:
+                taxa = float(reemb.data[0].get("valor", 0))
+                roi *= (1 - (taxa * 1.5))
+            except Exception:
+                pass
 
         supabase.table("monetizacao_produtos").update({
-            "roi_previsto": roi
+            "roi_previsto": roi,
+            "updated_at": agora_iso()
         }).eq("id_produto", id_produto).execute()
 
         return {
@@ -560,16 +777,27 @@ def calcular_roi(id_produto: str):
             "status": "ROI calculado e atualizado"
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # =========================================================
-#  ESCALA AUTOMÁTICA (mantido)
+#  ESCALA AUTOMÁTICA (motor)
 # =========================================================
 @app.post("/escala-automatica")
 def escala_automatica():
+    """
+    Motor automático de escalada:
+    - seleciona produto elegível
+    - calcula ROI
+    - compara com ROI_MINIMO
+    - checa capital e cooldown
+    - registra decisão e retorna ação recomendada
+    """
     try:
+        # cooldown
         last = (
             supabase.table("decisoes_robo")
             .select("*")
@@ -586,6 +814,7 @@ def escala_automatica():
             except Exception:
                 pass
 
+        # capital
         cap = (
             supabase.table("capital_interno")
             .select("*")
@@ -597,6 +826,7 @@ def escala_automatica():
         if saldo < CAPITAL_MINIMO_PARA_ESCALA:
             return {"status": "fora_capital", "mensagem": "Saldo insuficiente para escalar."}
 
+        # produtos elegiveis
         produtos = (
             supabase.table("produtos_elegiveis")
             .select("*")
@@ -607,13 +837,15 @@ def escala_automatica():
         if not produtos_list:
             return {"status": "erro", "mensagem": "Nenhum produto elegível."}
 
+        # escolher melhor candidato por score (ROI * prioridade)
         melhor = None
         melhor_roi = -999
         for p in produtos_list:
             idp = p.get("id_produto")
+            roi_val = 0
             try:
-                roi_resp = calcular_roi(idp)
-                roi_val = roi_resp.get("roi_previsto", 0)
+                resp = calcular_roi(idp)
+                roi_val = resp.get("roi_previsto", 0) if isinstance(resp, dict) else 0
             except Exception:
                 roi_val = 0
 
@@ -621,7 +853,7 @@ def escala_automatica():
             if p.get("pagamento") == "imediato":
                 prioridade += 0.1
 
-            score = roi_val * prioridade
+            score = (roi_val or 0) * prioridade
 
             if score > melhor_roi:
                 melhor_roi = score
@@ -633,6 +865,7 @@ def escala_automatica():
         produto = melhor["produto"]
         roi_val = melhor["roi"]
 
+        # decisão
         if roi_val >= ROI_MINIMO:
             acao = "escalar"
             motivo = f"ROI {roi_val:.4f} >= {ROI_MINIMO}"
@@ -643,7 +876,7 @@ def escala_automatica():
                 "motivo": motivo,
                 "capital_disponivel": saldo,
                 "recomendacao": "Iniciar escalada controlada",
-                "created_at": datetime.utcnow().isoformat()
+                "created_at": agora_iso()
             }).execute()
 
             try:
@@ -670,7 +903,7 @@ def escala_automatica():
                 "motivo": motivo,
                 "capital_disponivel": saldo,
                 "recomendacao": "Aguardar melhorias",
-                "created_at": datetime.utcnow().isoformat()
+                "created_at": agora_iso()
             }).execute()
 
             return {
@@ -682,27 +915,75 @@ def escala_automatica():
             }
 
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # =========================================================
-#  CICLO / RESULTADO / LOOP (mantidos)
+#  WEBHOOK UNIVERSAL (SUBSTITUI TODOS OS WEBHOOKS INDIVIDUAIS)
+# =========================================================
+@app.post("/webhook/universal")
+async def webhook_universal(request: Request):
+    """
+    Webhook Universal:
+    - exige header X-ROBO-SECRET == WEBHOOK_SECRET
+    - autodetecta a plataforma
+    - mapeia e padroniza
+    - persiste vendas e métricas padronizadas
+    - atualiza ROI quando aplicável
+    """
+    # autenticação simples por segredo universal
+    header_secret = request.headers.get("X-ROBO-SECRET", "") or request.query_params.get("secret", "")
+    if not WEBHOOK_SECRET or header_secret != WEBHOOK_SECRET:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    try:
+        body = await request.body()
+        try:
+            payload = json.loads(body.decode("utf-8")) if body else {}
+        except Exception:
+            # tentar como form-data ou texto
+            payload = {}
+
+        headers = dict(request.headers)
+        plataforma = identificar_plataforma(payload, headers)
+
+        mapped = mapear_evento_plataforma(plataforma, payload)
+        persistir_evento_padronizado(plataforma, mapped)
+
+        # opcional: atualizar ROI do produto se product_id vier
+        pid = mapped.get("produto_id")
+        if pid:
+            try:
+                calcular_roi(pid)
+            except Exception:
+                pass
+
+        return {"status": "ok", "plataforma": plataforma, "evento": mapped.get("tipo_evento")}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =========================================================
+#  CICLO (ATUALIZADO PARA USAR O MOTOR AUTOMÁTICO)
 # =========================================================
 @app.get("/ciclo")
 def ciclo():
     try:
         decisao_resp = decisao()
-        decisao_texto = decisao_resp["acao"]
-        produto_nome = decisao_resp["produto"]["nome"]
+        decisao_texto = decisao_resp.get("acao") if isinstance(decisao_resp, dict) else None
+        produto_nome = decisao_resp.get("produto", {}).get("nome") if isinstance(decisao_resp, dict) else None
 
+        # prioriza o motor automático de escala
         escala_resp = escala_automatica()
 
         plano_resp = plano_diario()
-        plano_texto = plano_resp["acao"]
+        plano_texto = plano_resp.get("acao") if isinstance(plano_resp, dict) else None
 
         analise_resp = analise()
-        capital_valor = analise_resp["capital"]
-        risco_valor = analise_resp["risco"]
+        capital_valor = analise_resp.get("capital") if isinstance(analise_resp, dict) else None
+        risco_valor = analise_resp.get("risco") if isinstance(analise_resp, dict) else None
 
         supabase.table("ciclos_robo").insert({
             "produto_nome": produto_nome,
@@ -711,7 +992,7 @@ def ciclo():
             "capital": capital_valor,
             "risco": risco_valor,
             "escala": escala_resp.get("acao") if isinstance(escala_resp, dict) else None,
-            "created_at": datetime.utcnow().isoformat()
+            "created_at": agora_iso()
         }).execute()
 
         return {
@@ -724,9 +1005,12 @@ def ciclo():
             "status": "Ciclo executado com sucesso",
         }
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 
+# =========================================================
+#  RESULTADO CONSOLIDADO
+# =========================================================
 @app.get("/resultado")
 def resultado():
     try:
@@ -783,9 +1067,12 @@ def resultado():
             "ciclo": ciclo_dados,
         }
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 
+# =========================================================
+#  LOOP DIÁRIO
+# =========================================================
 @app.get("/loop-diario")
 def loop_diario(qtd: int = 1):
     try:
@@ -803,4 +1090,9 @@ def loop_diario(qtd: int = 1):
             "status": "Loop diário executado com sucesso",
         }
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =========================================================
+#  END
+# =========================================================
