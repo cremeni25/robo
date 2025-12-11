@@ -4,9 +4,8 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Optional
 from supabase_client import get_supabase
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
-
 
 # =========================================================
 #  CONFIGURAÇÃO PRINCIPAL DA API (ÚNICO app = FastAPI)
@@ -34,6 +33,12 @@ app.add_middleware(
 # Conexão única com o Supabase
 supabase = get_supabase()
 
+# =========================================================
+#  CONFIGURAÇÕES OPERACIONAIS (AJUSTÁVEIS)
+# =========================================================
+ROI_MINIMO = 1.2              # definido por você
+CAPITAL_MINIMO_PARA_ESCALA = 10.0  # valor mínimo de saldo para permitir escala (ajustável)
+COOLDOWN_HORAS = 1           # mínimo entre execuções de escala para evitar loops agressivos
 
 # =========================================================
 #  MODELOS
@@ -42,7 +47,6 @@ class AtualizarPayload(BaseModel):
     id_produto: str
     metrica: str
     valor: float
-
 
 # =========================================================
 #  ENDPOINTS BÁSICOS
@@ -533,7 +537,7 @@ def escala():
 
 
 # =========================================================
-#  ROI AUTOMÁTICO  (NOVO — POSIÇÃO CONFIRMADA)
+#  ROI AUTOMÁTICO  (POSIÇÃO CONFIRMADA)
 # =========================================================
 @app.get("/roi/{id_produto}")
 def calcular_roi(id_produto: str):
@@ -593,7 +597,146 @@ def calcular_roi(id_produto: str):
 
 
 # =========================================================
-#  CICLO COMPLETO
+#  ESCALA AUTOMÁTICA (NOVO MOTOR) - AÇÃO 4
+# =========================================================
+@app.post("/escala-automatica")
+def escala_automatica():
+    """
+    Motor automático de escalada:
+    - seleciona produto elegível
+    - calcula ROI (usa /roi logic)
+    - compara com ROI_MINIMO
+    - checa capital e cooldown
+    - registra decisão e retorna ação recomendada
+    """
+    try:
+        # 1) verificar último horário de escala para cooldown
+        last = (
+            supabase.table("decisoes_robo")
+            .select("*")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if last.data and "created_at" in last.data[0]:
+            ultima = last.data[0]["created_at"]
+            try:
+                ultima_dt = datetime.fromisoformat(ultima)
+                if datetime.utcnow() - ultima_dt < timedelta(hours=COOLDOWN_HORAS):
+                    return {"status": "cooldown", "mensagem": "Cooldown ativo. Aguardar."}
+            except Exception:
+                # se created_at não for ISO, ignorar e prosseguir
+                pass
+
+        # 2) capital disponível
+        cap = (
+            supabase.table("capital_interno")
+            .select("*")
+            .order("id", desc=True)
+            .limit(1)
+            .execute()
+        )
+        saldo = cap.data[0]["saldo_atual"] if cap.data else 0.0
+        if saldo < CAPITAL_MINIMO_PARA_ESCALA:
+            return {"status": "fora_capital", "mensagem": "Saldo insuficiente para escalar."}
+
+        # 3) escolher melhor produto elegível (critério: ticket_medio * comissao_media / preco ou existente)
+        produtos = (
+            supabase.table("produtos_elegiveis")
+            .select("*")
+            .eq("status", "aprovado")
+            .execute()
+        )
+        produtos_list = produtos.data
+        if not produtos_list:
+            return {"status": "erro", "mensagem": "Nenhum produto elegível."}
+
+        # buscar melhores candidatos e calcular ROI via lógica já existente
+        melhor = None
+        melhor_roi = -999
+        for p in produtos_list:
+            idp = p.get("id_produto")
+            # chamar função interna calcular_roi (não via HTTP)
+            try:
+                roi_resp = calcular_roi(idp)
+                roi_val = roi_resp.get("roi_previsto", 0)
+            except Exception:
+                roi_val = 0
+
+            # priorizar pagamento imediato e maior roi
+            prioridade = 1
+            if p.get("pagamento") == "imediato":
+                prioridade += 0.1
+
+            score = roi_val * prioridade
+
+            if score > melhor_roi:
+                melhor_roi = score
+                melhor = {"produto": p, "roi": roi_val}
+
+        if not melhor:
+            return {"status": "erro", "mensagem": "Não foi possível determinar produto para escalar."}
+
+        produto = melhor["produto"]
+        roi_val = melhor["roi"]
+
+        # 4) decisão baseada no ROI_MINIMO
+        if roi_val >= ROI_MINIMO:
+            acao = "escalar"
+            motivo = f"ROI {roi_val:.4f} >= {ROI_MINIMO}"
+            # registrar decisão de escala
+            supabase.table("decisoes_robo").insert({
+                "produto_id": produto.get("id_produto"),
+                "produto_nome": produto.get("nome"),
+                "acao": acao,
+                "motivo": motivo,
+                "capital_disponivel": saldo,
+                "recomendacao": "Iniciar escalada controlada",
+                "created_at": datetime.utcnow().isoformat()
+            }).execute()
+
+            # opcional: marcar produto como em_escala (coluna hipotética)
+            try:
+                supabase.table("produtos_elegiveis").update({
+                    "em_escala": True
+                }).eq("id_produto", produto.get("id_produto")).execute()
+            except Exception:
+                pass
+
+            return {
+                "status": "ok",
+                "acao": acao,
+                "produto": produto,
+                "roi": roi_val,
+                "mensagem": "Escalada autorizada e registrada."
+            }
+        else:
+            acao = "nao_escalar"
+            motivo = f"ROI {roi_val:.4f} < {ROI_MINIMO}"
+            supabase.table("decisoes_robo").insert({
+                "produto_id": produto.get("id_produto"),
+                "produto_nome": produto.get("nome"),
+                "acao": acao,
+                "motivo": motivo,
+                "capital_disponivel": saldo,
+                "recomendacao": "Aguardar melhorias",
+                "created_at": datetime.utcnow().isoformat()
+            }).execute()
+
+            return {
+                "status": "ok",
+                "acao": acao,
+                "produto": produto,
+                "roi": roi_val,
+                "mensagem": "Escalada não autorizada — ROI abaixo do mínimo."
+            }
+
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+# =========================================================
+#  CICLO (ATUALIZADO PARA USAR O MOTOR AUTOMÁTICO)
 # =========================================================
 @app.get("/ciclo")
 def ciclo():
@@ -602,6 +745,9 @@ def ciclo():
         decisao_texto = decisao_resp["acao"]
         produto_nome = decisao_resp["produto"]["nome"]
 
+        # prioriza o motor automático de escala
+        escala_resp = escala_automatica()
+
         plano_resp = plano_diario()
         plano_texto = plano_resp["acao"]
 
@@ -609,16 +755,14 @@ def ciclo():
         capital_valor = analise_resp["capital"]
         risco_valor = analise_resp["risco"]
 
-        escala_resp = escala()
-        escala_texto = escala_resp["decisao"]
-
         supabase.table("ciclos_robo").insert({
             "produto_nome": produto_nome,
             "decisao": decisao_texto,
             "plano": plano_texto,
             "capital": capital_valor,
             "risco": risco_valor,
-            "escala": escala_texto,
+            "escala": escala_resp.get("acao") if isinstance(escala_resp, dict) else None,
+            "created_at": datetime.utcnow().isoformat()
         }).execute()
 
         return {
@@ -627,7 +771,7 @@ def ciclo():
             "plano": plano_texto,
             "capital": capital_valor,
             "risco": risco_valor,
-            "escala": escala_texto,
+            "escala": escala_resp,
             "status": "Ciclo executado com sucesso",
         }
     except Exception as e:
