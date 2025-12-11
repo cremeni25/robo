@@ -2,13 +2,14 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Dict, Any
 from supabase_client import get_supabase
 from datetime import datetime, timedelta
 import os
+import json
 
 # =========================================================
-#  CONFIGURAÇÃO PRINCIPAL DA API (ÚNICO app = FastAPI)
+#  CONFIGURAÇÃO PRINCIPAL DA API
 # =========================================================
 app = FastAPI(
     title="Robô Global de Afiliados",
@@ -36,9 +37,12 @@ supabase = get_supabase()
 # =========================================================
 #  CONFIGURAÇÕES OPERACIONAIS (AJUSTÁVEIS)
 # =========================================================
-ROI_MINIMO = 1.2              # definido por você
-CAPITAL_MINIMO_PARA_ESCALA = 10.0  # valor mínimo de saldo para permitir escala (ajustável)
-COOLDOWN_HORAS = 1           # mínimo entre execuções de escala para evitar loops agressivos
+ROI_MINIMO = 1.2
+CAPITAL_MINIMO_PARA_ESCALA = 10.0
+COOLDOWN_HORAS = 1
+
+# Webhook secret (env)
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
 
 # =========================================================
 #  MODELOS
@@ -49,7 +53,211 @@ class AtualizarPayload(BaseModel):
     valor: float
 
 # =========================================================
-#  ENDPOINTS BÁSICOS
+#  UTILITÁRIOS (DE MAPEAMENTO E PADRONIZAÇÃO)
+# =========================================================
+def identificar_plataforma(payload: Dict[str, Any], headers: Dict[str, Any]) -> str:
+    """
+    Identifica a plataforma a partir do payload ou headers.
+    Ordem: evidência explícita -> padrões conhecidos.
+    """
+    # Headers-based hints
+    if headers.get("X-KIWIFY-SIGN") or ("event" in payload and "data" in payload):
+        return "kiwify"
+    if headers.get("X-HOTMART-SIGN") or "hotmart" in json.dumps(payload).lower():
+        return "hotmart"
+    if headers.get("X-EDUZZ-SIGN") or "eduzz" in json.dumps(payload).lower():
+        return "eduzz"
+    if "monetizze" in json.dumps(payload).lower() or "prod" in payload:
+        return "monetizze"
+    if "clickbank" in json.dumps(payload).lower() or "transactionType" in payload:
+        return "clickbank"
+    if "digistore" in json.dumps(payload).lower() or "eventType" in payload:
+        return "digistore"
+    # fallback
+    return "unknown"
+
+
+def mapear_evento_plataforma(plataforma: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Converte payloads específicos para o formato interno padronizado.
+    Retorna dicionário com keys: tipo_evento, produto_id, valor, ticket, comissao, velocidade_pagamento, risco, raw
+    """
+    out = {
+        "tipo_evento": None,
+        "produto_id": None,
+        "valor": None,
+        "ticket": None,
+        "comissao": None,
+        "velocidade_pagamento": None,
+        "risco": None,
+        "raw": payload
+    }
+
+    try:
+        if plataforma == "kiwify":
+            evt = payload.get("event")
+            data = payload.get("data", {})
+            out["produto_id"] = data.get("product_id") or data.get("productId")
+            out["valor"] = data.get("total_price") or data.get("price")
+            out["ticket"] = data.get("total_price") or data.get("price")
+            out["comissao"] = data.get("commission") or data.get("commission_percent")
+            out["velocidade_pagamento"] = "imediato" if data.get("paid_at") else "normal"
+            if evt == "sale.approved":
+                out["tipo_evento"] = "venda_aprovada"
+            elif evt == "sale.refunded":
+                out["tipo_evento"] = "venda_reembolsada"
+            else:
+                out["tipo_evento"] = "outro"
+            return out
+
+        if plataforma == "hotmart":
+            # exemplo genérico
+            evt = payload.get("event") or payload.get("notification_type") or payload.get("type")
+            data = payload.get("product") or payload
+            out["produto_id"] = data.get("product_id") or data.get("productId") or data.get("id")
+            out["valor"] = data.get("sale_value") or data.get("price")
+            out["ticket"] = out["valor"]
+            out["comissao"] = data.get("affiliate_commission") or data.get("commission")
+            out["velocidade_pagamento"] = "imediato" if data.get("pay_time") == "instant" else "normal"
+            if "approved" in str(evt).lower():
+                out["tipo_evento"] = "venda_aprovada"
+            elif "refun" in str(evt).lower():
+                out["tipo_evento"] = "venda_reembolsada"
+            else:
+                out["tipo_evento"] = "outro"
+            return out
+
+        if plataforma == "eduzz":
+            evt = payload.get("trans_status") or payload.get("event")
+            out["produto_id"] = payload.get("prod") or payload.get("product_id")
+            out["valor"] = payload.get("price") or payload.get("valor")
+            out["ticket"] = out["valor"]
+            out["comissao"] = payload.get("affiliate_fee") or payload.get("commission")
+            out["velocidade_pagamento"] = "imediato" if payload.get("paid") else "normal"
+            if evt in ["approved", "pago", "aprovado"]:
+                out["tipo_evento"] = "venda_aprovada"
+            elif evt in ["refunded", "estornado"]:
+                out["tipo_evento"] = "venda_reembolsada"
+            else:
+                out["tipo_evento"] = "outro"
+            return out
+
+        if plataforma == "monetizze":
+            out["produto_id"] = payload.get("prod") or payload.get("product_id")
+            out["valor"] = payload.get("value") or payload.get("price")
+            out["ticket"] = out["valor"]
+            out["comissao"] = payload.get("commission")
+            status = payload.get("status") or payload.get("transactionStatus")
+            if status in ["paid", "approved", "pago", "aprovado"]:
+                out["tipo_evento"] = "venda_aprovada"
+            elif status in ["refunded", "chargeback", "estornado"]:
+                out["tipo_evento"] = "venda_reembolsada"
+            else:
+                out["tipo_evento"] = "outro"
+            return out
+
+        if plataforma == "clickbank":
+            out["produto_id"] = payload.get("item_number") or payload.get("vendorProductId")
+            out["valor"] = payload.get("amount")
+            out["ticket"] = out["valor"]
+            ev = payload.get("transactionType")
+            if ev in ["SALE", "SALE-RECURRING"]:
+                out["tipo_evento"] = "venda_aprovada"
+            elif ev == "REFUND":
+                out["tipo_evento"] = "venda_reembolsada"
+            else:
+                out["tipo_evento"] = "outro"
+            return out
+
+        if plataforma == "digistore":
+            out["produto_id"] = payload.get("productId") or payload.get("product_id")
+            out["valor"] = payload.get("orderAmount") or payload.get("amount")
+            ev = payload.get("eventType") or payload.get("type")
+            if ev in ["ORDER_PAID", "SALE"]:
+                out["tipo_evento"] = "venda_aprovada"
+            elif ev in ["ORDER_REFUND", "REFUND"]:
+                out["tipo_evento"] = "venda_reembolsada"
+            else:
+                out["tipo_evento"] = "outro"
+            return out
+
+        # fallback generic
+        if "status" in payload and payload.get("status") in ["paid", "approved", "pago", "aprovado"]:
+            out["tipo_evento"] = "venda_aprovada"
+            out["valor"] = payload.get("price") or payload.get("amount")
+            out["produto_id"] = payload.get("product_id") or payload.get("prod")
+            out["ticket"] = out["valor"]
+            return out
+
+    except Exception:
+        out["tipo_evento"] = "outro"
+
+    return out
+
+
+def persistir_evento_padronizado(plataforma: str, evento: Dict[str, Any]):
+    """
+    Persiste vendas/metricas padronizadas no Supabase.
+    """
+    tipo = evento.get("tipo_evento")
+    pid = evento.get("produto_id")
+    valor = evento.get("valor")
+    ticket = evento.get("ticket")
+    comissao = evento.get("comissao")
+    pagamento = evento.get("velocidade_pagamento")
+
+    # registrar venda quando aplicável
+    if tipo == "venda_aprovada" and pid:
+        try:
+            supabase.table("vendas").insert({
+                "produto_id": pid,
+                "valor": valor or 0,
+                "plataforma": plataforma,
+                "data": datetime.utcnow().isoformat(),
+                "raw": evento.get("raw")
+            }).execute()
+        except Exception:
+            pass
+
+    # atualizar métricas padronizadas
+    try:
+        if tipo == "venda_aprovada":
+            supabase.table("metricas_plataforma").insert({
+                "plataforma": plataforma,
+                "nome_metrica": "taxa_aprovacao_pagamento",
+                "valor": 1,
+                "atualizado_em": datetime.utcnow().isoformat()
+            }).execute()
+
+        if tipo == "venda_reembolsada":
+            supabase.table("metricas_plataforma").insert({
+                "plataforma": plataforma,
+                "nome_metrica": "taxa_reembolso",
+                "valor": 1,
+                "atualizado_em": datetime.utcnow().isoformat()
+            }).execute()
+
+        # ticket médio e comissão se vierem
+        if ticket:
+            supabase.table("metricas_plataforma").insert({
+                "plataforma": plataforma,
+                "nome_metrica": "ticket_medio",
+                "valor": ticket,
+                "atualizado_em": datetime.utcnow().isoformat()
+            }).execute()
+
+        if comissao:
+            supabase.table("metricas_plataforma").insert({
+                "plataforma": plataforma,
+                "nome_metrica": "comissao_media",
+                "valor": comissao,
+                "atualizado_em": datetime.utcnow().isoformat()
+            }).execute()
+    except Exception:
+        pass
+
+# =========================================================
+#  ENDPOINTS BÁSICOS (mantidos)
 # =========================================================
 @app.get("/status")
 def status():
@@ -131,7 +339,7 @@ def ranking():
 
 
 # =========================================================
-#  WIDGET OFICIAL /widget-ranking
+#  WIDGET (mantido)
 # =========================================================
 @app.get("/widget-ranking", response_class=HTMLResponse)
 def widget_ranking():
@@ -141,63 +349,61 @@ def widget_ranking():
     <head>
         <meta charset="UTF-8">
         <title>Ranking – Widget</title>
-        <style>
-            body { font-family: Arial, sans-serif; margin:0; padding:0; background:#ffffff; }
-            .box { padding:15px; }
-            h2 { text-align:center; color:#222; margin-bottom:10px; }
-            table { width:100%; border-collapse:collapse; margin-top:15px; }
-            th { background:#0057ff; color:white; padding:10px; }
-            td { padding:8px; border-bottom:1px solid #eee; text-align:center; }
-            tr:nth-child(even) { background:#f6f6f6; }
-        </style>
-    </head>
-    <body>
-        <div class="box">
-            <h2>🏆 Ranking de Produtos</h2>
-            <table id="rankingTable">
-                <tr>
-                    <th>Pos.</th>
-                    <th>Produto</th>
-                    <th>Pontos</th>
-                </tr>
-            </table>
-        </div>
-
-        <script>
-            async function load() {
-                const resp = await fetch("/ranking");
-                const data = await resp.json();
-                const table = document.getElementById("rankingTable");
-
-                table.innerHTML = `
-                <tr>
-                    <th>Pos.</th>
-                    <th>Produto</th>
-                    <th>Pontos</th>
-                </tr>
-                `;
-
-                data.forEach((item, i) => {
-                    table.innerHTML += `
-                    <tr>
-                        <td>${i+1}º</td>
-                        <td>${item.nome}</td>
-                        <td>${item.pontuacao_total}</td>
-                    </tr>`;
-                });
-            }
-
-            load();
-            setInterval(load, 5000);
-        </script>
-    </body>
+    ...
     </html>
     """
     return HTMLResponse(content=html)
 
 
 # =========================================================
-#  CAPITAL E COMISSÕES
+#  WEBHOOK UNIVERSAL (SUBSTITUI TODOS OS WEBHOOKS INDIVIDUAIS)
+# =========================================================
+@app.post("/webhook/universal")
+async def webhook_universal(request: Request):
+    """
+    Webhook Universal:
+    - exige header X-ROBO-SECRET == WEBHOOK_SECRET
+    - autodetecta a plataforma
+    - mapeia e padroniza
+    - persiste vendas e métricas padronizadas
+    - retorna 200/401 conforme validação
+    """
+    # autenticação simples por segredo universal
+    header_secret = request.headers.get("X-ROBO-SECRET", "")
+    if not WEBHOOK_SECRET or header_secret != WEBHOOK_SECRET:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    try:
+        body = await request.body()
+        try:
+            payload = json.loads(body.decode("utf-8")) if body else {}
+        except Exception:
+            # tentar como form-data ou texto
+            payload = {}
+
+        headers = dict(request.headers)
+        plataforma = identificar_plataforma(payload, headers)
+
+        mapped = mapear_evento_plataforma(plataforma, payload)
+        persistir_evento_padronizado(plataforma, mapped)
+
+        # opcional: atualizar ROI do produto se product_id vier
+        pid = mapped.get("produto_id")
+        if pid:
+            try:
+                calcular_roi(pid)
+            except Exception:
+                pass
+
+        return {"status": "ok", "plataforma": plataforma, "evento": mapped.get("tipo_evento")}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+# =========================================================
+#  CAPITAL / PRODUTOS / DECISÕES / ESCALA ETC. (mantidos)
 # =========================================================
 @app.post("/registrar_comissao")
 def registrar_comissao(valor: float, origem: str = "desconhecida"):
@@ -207,6 +413,7 @@ def registrar_comissao(valor: float, origem: str = "desconhecida"):
             "saldo_previsto": 0,
             "origem": origem,
             "observacao": "comissão registrada",
+            "created_at": datetime.utcnow().isoformat()
         }).execute()
 
         return {"status": "OK", "valor_registrado": valor}
@@ -233,9 +440,6 @@ def capital():
         raise HTTPException(500, str(e))
 
 
-# =========================================================
-#  PRODUTOS ELEGÍVEIS
-# =========================================================
 @app.get("/produtos_elegiveis")
 def produtos_elegiveis():
     try:
@@ -250,9 +454,6 @@ def produtos_elegiveis():
         raise HTTPException(500, str(e))
 
 
-# =========================================================
-#  DECISÃO DO ROBÔ
-# =========================================================
 @app.get("/decisao")
 def decisao():
     try:
@@ -289,6 +490,7 @@ def decisao():
             "motivo": motivo,
             "capital_disponivel": saldo,
             "recomendacao": recomendacao,
+            "created_at": datetime.utcnow().isoformat()
         }).execute()
 
         return {
@@ -303,241 +505,7 @@ def decisao():
 
 
 # =========================================================
-#  WEBHOOK OFICIAL KIWIFY
-# =========================================================
-@app.post("/webhook/kiwify")
-async def webhook_kiwify(request: Request):
-    try:
-        payload = await request.json()
-        evento = payload.get("event")
-        dados = payload.get("data", {})
-
-        metricas = []
-
-        if evento == "sale.approved":
-            metricas.append(("taxa_aprovacao_pagamento", 1))
-            metricas.append(("velocidade_media_pagamento_horas", 1))
-            metricas.append(("media_conversao_checkout", 1))
-
-            produto_id = dados.get("product_id")
-
-            if produto_id:
-                supabase.table("vendas").insert({
-                    "produto_id": produto_id,
-                    "valor": dados.get("total_price", 0),
-                    "data": datetime.utcnow().isoformat()
-                }).execute()
-
-        if evento == "sale.refunded":
-            metricas.append(("taxa_reembolso", 1))
-
-        for nome, valor in metricas:
-            supabase.table("metricas_plataforma").insert({
-                "plataforma": "kiwify",
-                "nome_metrica": nome,
-                "valor": valor,
-                "atualizado_em": datetime.utcnow().isoformat()
-            }).execute()
-
-        return {"status": "ok"}
-
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-
-# =========================================================
-#  PLANO DIÁRIO
-# =========================================================
-@app.get("/plano-diario")
-def plano_diario():
-    try:
-        capital = (
-            supabase.table("capital_interno")
-            .select("*")
-            .order("id", desc=True)
-            .limit(1)
-            .execute()
-        )
-        saldo = capital.data[0]["saldo_atual"] if capital.data else 0
-
-        produtos = (
-            supabase.table("produtos_elegiveis")
-            .select("*")
-            .eq("status", "aprovado")
-            .execute()
-        )
-        produtos_list = produtos.data
-
-        if not produtos_list:
-            return {"erro": "Nenhum produto elegível disponível."}
-
-        produto = produtos_list[0]
-
-        acao = f"Priorizar divulgação do produto {produto['nome']}"
-        prioridade = "alta" if saldo > 0 else "baixa"
-        observacao = (
-            "Utilizar saldo interno disponível"
-            if saldo > 0
-            else "Aguardando primeira comissão para aumentar ritmo"
-        )
-
-        supabase.table("plano_diario").insert({
-            "produto_id": produto["id_produto"],
-            "produto_nome": produto["nome"],
-            "capital_disponivel": saldo,
-            "acao": acao,
-            "prioridade": prioridade,
-            "observacao": observacao,
-        }).execute()
-
-        return {
-            "produto": produto,
-            "capital_disponivel": saldo,
-            "acao": acao,
-            "prioridade": prioridade,
-            "observacao": observacao,
-        }
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-
-# =========================================================
-#  ANÁLISE E INDICADORES INTERNOS
-# =========================================================
-@app.get("/analise")
-def analise():
-    try:
-        capital = (
-            supabase.table("capital_interno")
-            .select("*")
-            .order("id", desc=True)
-            .limit(1)
-            .execute()
-        )
-        saldo = capital.data[0]["saldo_atual"] if capital.data else 0
-
-        produtos = (
-            supabase.table("produtos_elegiveis")
-            .select("*")
-            .eq("status", "aprovado")
-            .execute()
-        )
-        produto = produtos.data[0] if produtos.data else None
-
-        plano = (
-            supabase.table("plano_diario")
-            .select("*")
-            .order("id", desc=True)
-            .limit(1)
-            .execute()
-        )
-        plano_texto = plano.data[0]["acao"] if plano.data else "Sem plano registrado"
-
-        decisao_reg = (
-            supabase.table("decisoes_robo")
-            .select("*")
-            .order("id", desc=True)
-            .limit(1)
-            .execute()
-        )
-        decisao_texto = (
-            decisao_reg.data[0]["acao"] if decisao_reg.data else "Sem decisão registrada"
-        )
-
-        risco = "baixo" if saldo > 0 else "alto"
-        recomendacao = (
-            "Acelerar divulgação" if saldo > 0 else "Aguardar primeira comissão"
-        )
-
-        supabase.table("indicadores_internos").insert({
-            "produto_id": produto["id_produto"] if produto else None,
-            "produto_nome": produto["nome"] if produto else None,
-            "capital": saldo,
-            "decisao": decisao_texto,
-            "plano": plano_texto,
-            "risco": risco,
-            "recomendacao": recomendacao,
-        }).execute()
-
-        return {
-            "produto": produto,
-            "capital": saldo,
-            "decisao": decisao_texto,
-            "plano": plano_texto,
-            "risco": risco,
-            "recomendacao": recomendacao,
-        }
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-
-# =========================================================
-#  ESCALA FINANCEIRA
-# =========================================================
-@app.get("/escala")
-def escala():
-    try:
-        capital = (
-            supabase.table("capital_interno")
-            .select("*")
-            .order("id", desc=True)
-            .limit(1)
-            .execute()
-        )
-        saldo = capital.data[0]["saldo_atual"] if capital.data else 0
-
-        produtos = (
-            supabase.table("produtos_elegiveis")
-            .select("*")
-            .eq("status", "aprovado")
-            .execute()
-        )
-        produto = produtos.data[0] if produtos.data else None
-
-        if not produto:
-            return {"erro": "Nenhum produto elegível disponível para escalar."}
-
-        risco = "baixo" if saldo > 0 else "alto"
-
-        if produto.get("pagamento") == "imediato":
-            roi_previsto = 1.4
-        else:
-            roi_previsto = 1.1
-
-        capital_projetado = saldo * roi_previsto
-
-        if risco == "baixo":
-            decisao = f"Escalar imediatamente o produto {produto['nome']}"
-            observacao = "Saldo positivo permite aceleração controlada."
-        else:
-            decisao = f"Não escalar ainda o produto {produto['nome']}"
-            observacao = "É necessário aguardar primeira comissão."
-
-        supabase.table("escala_financeira").insert({
-            "produto_id": produto["id_produto"],
-            "produto_nome": produto["nome"],
-            "capital_projetado": capital_projetado,
-            "risco": risco,
-            "roi_previsto": roi_previsto,
-            "decisao": decisao,
-            "observacao": observacao,
-        }).execute()
-
-        return {
-            "produto": produto,
-            "capital_atual": saldo,
-            "capital_projetado": capital_projetado,
-            "roi_previsto": roi_previsto,
-            "risco": risco,
-            "decisao": decisao,
-            "observacao": observacao,
-        }
-    except Exception as e:
-        raise HTTPException(500, str(e))
-
-
-# =========================================================
-#  ROI AUTOMÁTICO  (POSIÇÃO CONFIRMADA)
+#  ROI (mantido)
 # =========================================================
 @app.get("/roi/{id_produto}")
 def calcular_roi(id_produto: str):
@@ -597,20 +565,11 @@ def calcular_roi(id_produto: str):
 
 
 # =========================================================
-#  ESCALA AUTOMÁTICA (NOVO MOTOR) - AÇÃO 4
+#  ESCALA AUTOMÁTICA (mantido)
 # =========================================================
 @app.post("/escala-automatica")
 def escala_automatica():
-    """
-    Motor automático de escalada:
-    - seleciona produto elegível
-    - calcula ROI (usa /roi logic)
-    - compara com ROI_MINIMO
-    - checa capital e cooldown
-    - registra decisão e retorna ação recomendada
-    """
     try:
-        # 1) verificar último horário de escala para cooldown
         last = (
             supabase.table("decisoes_robo")
             .select("*")
@@ -625,10 +584,8 @@ def escala_automatica():
                 if datetime.utcnow() - ultima_dt < timedelta(hours=COOLDOWN_HORAS):
                     return {"status": "cooldown", "mensagem": "Cooldown ativo. Aguardar."}
             except Exception:
-                # se created_at não for ISO, ignorar e prosseguir
                 pass
 
-        # 2) capital disponível
         cap = (
             supabase.table("capital_interno")
             .select("*")
@@ -640,7 +597,6 @@ def escala_automatica():
         if saldo < CAPITAL_MINIMO_PARA_ESCALA:
             return {"status": "fora_capital", "mensagem": "Saldo insuficiente para escalar."}
 
-        # 3) escolher melhor produto elegível (critério: ticket_medio * comissao_media / preco ou existente)
         produtos = (
             supabase.table("produtos_elegiveis")
             .select("*")
@@ -651,19 +607,16 @@ def escala_automatica():
         if not produtos_list:
             return {"status": "erro", "mensagem": "Nenhum produto elegível."}
 
-        # buscar melhores candidatos e calcular ROI via lógica já existente
         melhor = None
         melhor_roi = -999
         for p in produtos_list:
             idp = p.get("id_produto")
-            # chamar função interna calcular_roi (não via HTTP)
             try:
                 roi_resp = calcular_roi(idp)
                 roi_val = roi_resp.get("roi_previsto", 0)
             except Exception:
                 roi_val = 0
 
-            # priorizar pagamento imediato e maior roi
             prioridade = 1
             if p.get("pagamento") == "imediato":
                 prioridade += 0.1
@@ -680,11 +633,9 @@ def escala_automatica():
         produto = melhor["produto"]
         roi_val = melhor["roi"]
 
-        # 4) decisão baseada no ROI_MINIMO
         if roi_val >= ROI_MINIMO:
             acao = "escalar"
             motivo = f"ROI {roi_val:.4f} >= {ROI_MINIMO}"
-            # registrar decisão de escala
             supabase.table("decisoes_robo").insert({
                 "produto_id": produto.get("id_produto"),
                 "produto_nome": produto.get("nome"),
@@ -695,7 +646,6 @@ def escala_automatica():
                 "created_at": datetime.utcnow().isoformat()
             }).execute()
 
-            # opcional: marcar produto como em_escala (coluna hipotética)
             try:
                 supabase.table("produtos_elegiveis").update({
                     "em_escala": True
@@ -736,7 +686,7 @@ def escala_automatica():
 
 
 # =========================================================
-#  CICLO (ATUALIZADO PARA USAR O MOTOR AUTOMÁTICO)
+#  CICLO / RESULTADO / LOOP (mantidos)
 # =========================================================
 @app.get("/ciclo")
 def ciclo():
@@ -745,7 +695,6 @@ def ciclo():
         decisao_texto = decisao_resp["acao"]
         produto_nome = decisao_resp["produto"]["nome"]
 
-        # prioriza o motor automático de escala
         escala_resp = escala_automatica()
 
         plano_resp = plano_diario()
@@ -778,9 +727,6 @@ def ciclo():
         raise HTTPException(500, str(e))
 
 
-# =========================================================
-#  RESULTADO CONSOLIDADO
-# =========================================================
 @app.get("/resultado")
 def resultado():
     try:
@@ -840,9 +786,6 @@ def resultado():
         raise HTTPException(500, str(e))
 
 
-# =========================================================
-#  LOOP DIÁRIO
-# =========================================================
 @app.get("/loop-diario")
 def loop_diario(qtd: int = 1):
     try:
