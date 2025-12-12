@@ -1550,3 +1550,139 @@ async def eduzz_fix_final(request: Request, call_next):
     # Caso contrário segue o fluxo normal
     return await call_next(request)
 
+
+# =========================================================
+#  WEBHOOK EDUZZ (NATIVO — PADRÃO OFICIAL)
+# =========================================================
+@app.post("/webhook/eduzz")
+async def webhook_eduzz(request: Request):
+    """
+    Webhook oficial da EDUZZ
+    - Recebe payload nativo
+    - Identifica evento
+    - Normaliza pelo padrão interno
+    - Registra venda, reembolso, métricas
+    - Atualiza ROI do produto quando aplicável
+    - Loga tudo no Supabase
+    """
+
+    try:
+        headers = dict(request.headers)
+
+        # =========================================================
+        # VALIDAR SECRET DA EDUZZ (SE ATIVADO)
+        # =========================================================
+        eduzz_secret_expected = os.getenv("EDUZZ_SECRET", "")
+        eduzz_secret_received = (
+            headers.get("X-EDUZZ-SIGN")
+            or headers.get("x-eduzz-sign")
+            or request.query_params.get("sign")
+            or ""
+        )
+
+        # Só valida se o secret estiver configurado
+        if eduzz_secret_expected:
+            if eduzz_secret_received != eduzz_secret_expected:
+                try:
+                    supabase.table("webhook_logs").insert({
+                        "received_at": agora_iso(),
+                        "plataforma": "eduzz",
+                        "note": "unauthorized - secret mismatch",
+                        "headers": json.dumps(headers),
+                    }).execute()
+                except Exception:
+                    pass
+
+                raise HTTPException(status_code=401, detail="Unauthorized Eduzz")
+
+        # =========================================================
+        # OBTER PAYLOAD
+        # =========================================================
+        raw_body = await request.body()
+        try:
+            payload = json.loads(raw_body.decode("utf-8"))
+        except Exception:
+            payload = {}
+
+        # =========================================================
+        # NORMALIZAR EVENTO EDUZZ
+        # =========================================================
+        evt = payload.get("trans_status") or payload.get("event") or ""
+        prod_id = (
+            payload.get("prod")
+            or payload.get("product_id")
+            or payload.get("productId")
+            or None
+        )
+
+        valor = payload.get("price") or payload.get("valor") or 0
+        comissao = payload.get("affiliate_fee") or payload.get("commission") or 0
+
+        mapped = {
+            "tipo_evento": None,
+            "produto_id": prod_id,
+            "valor": valor,
+            "ticket": valor,
+            "comissao": comissao,
+            "velocidade_pagamento": "imediato" if payload.get("paid") else "normal",
+            "raw": payload,
+        }
+
+        evt_low = str(evt).lower()
+        if evt_low in ["approved", "aprovado", "pago"]:
+            mapped["tipo_evento"] = "venda_aprovada"
+        elif evt_low in ["refunded", "estornado"]:
+            mapped["tipo_evento"] = "venda_reembolsada"
+        else:
+            mapped["tipo_evento"] = "outro"
+
+        # =========================================================
+        # PERSISTIR NO SUPABASE
+        # =========================================================
+        persistir_evento_padronizado("eduzz", mapped)
+
+        # LOG DO EVENTO
+        try:
+            supabase.table("webhook_logs").insert({
+                "received_at": agora_iso(),
+                "plataforma": "eduzz",
+                "tipo_evento": mapped["tipo_evento"],
+                "produto_id": prod_id,
+                "raw": json.dumps(payload),
+            }).execute()
+        except Exception:
+            pass
+
+        # =========================================================
+        # RECALCULAR ROI (SE PRODUTO IDENTIFICADO)
+        # =========================================================
+        if prod_id:
+            try:
+                calcular_roi(prod_id)
+            except Exception:
+                pass
+
+        # =========================================================
+        # RESPOSTA FINAL
+        # =========================================================
+        return {
+            "status": "ok",
+            "plataforma": "eduzz",
+            "evento": mapped["tipo_evento"],
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        # logar falha inesperada
+        try:
+            supabase.table("webhook_logs").insert({
+                "received_at": agora_iso(),
+                "plataforma": "eduzz",
+                "error": str(e),
+            }).execute()
+        except Exception:
+            pass
+
+        raise HTTPException(status_code=500, detail=str(e))
+
