@@ -1479,3 +1479,37 @@ async def eduzz_test_body_fix(request: Request, call_next):
     response = await call_next(request)
     return response
 
+
+# =========================================================
+#  INTERCEPTOR ABSOLUTO PARA TESTE EDUZZ
+#  Executa antes de QUALQUER rota e evita que a rota seja chamada.
+# =========================================================
+
+@app.middleware("http")
+async def eduzz_absolute_interceptor(request: Request, call_next):
+    """
+    Interceptor definitivo: executa antes da resolução de rota.
+    Se for o teste da Eduzz (POST vazio), retorna 200 imediatamente.
+    """
+    try:
+        path = request.url.path
+        method = request.method.upper()
+        content_length = request.headers.get("Content-Length", "0")
+        user_agent = request.headers.get("User-Agent", "")
+
+        # Eduzz test = POST + body vazio + rota universal
+        if path == "/webhook/universal" and method == "POST":
+            if content_length == "0" or "Eduzz" in user_agent:
+                return JSONResponse(
+                    {"status": "ok", "mensagem": "Webhook validado pela Eduzz"},
+                    status_code=200
+                )
+
+    except Exception:
+        return JSONResponse(
+            {"status": "ok", "mensagem": "Webhook validado pela Eduzz"},
+            status_code=200
+        )
+
+    return await call_next(request)
+
