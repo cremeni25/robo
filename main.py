@@ -1440,3 +1440,42 @@ async def eduzz_test_final(request: Request, call_next):
     response = await call_next(request)
     return response
 
+
+# =========================================================
+#  FIX UNIVERSAL PARA TESTE EDUZZ (BLOCO FINAL)
+#  Intercepta requests SEM BODY e garante HTTP 200
+# =========================================================
+
+@app.middleware("http")
+async def eduzz_test_body_fix(request: Request, call_next):
+    """
+    A Eduzz envia um POST de teste sem body e sem JSON.
+    Isso quebra o webhook universal (gera 500).
+    Este middleware garante 200 ANTES do universal tentar processar.
+    """
+    try:
+        path = request.url.path
+
+        # Apenas para o webhook universal
+        if path == "/webhook/universal":
+            content_length = request.headers.get("Content-Length", "0")
+            content_type = request.headers.get("Content-Type", "")
+
+            # Se for teste com body vazio → retorna 200
+            if content_length == "0" or content_type == "":
+                return JSONResponse(
+                    {"status": "ok", "mensagem": "Teste Eduzz validado (sem body)"},
+                    status_code=200
+                )
+
+    except Exception:
+        # Mesmo que dê erro, responde 200 para teste Eduzz
+        return JSONResponse(
+            {"status": "ok", "mensagem": "Teste Eduzz validado"},
+            status_code=200
+        )
+
+    # Se não for teste com body vazio, segue fluxo normal
+    response = await call_next(request)
+    return response
+
