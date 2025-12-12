@@ -1,4 +1,4 @@
-# main.py — Robô Global de Afiliados (versão consolidada final)
+# main.py — Robô Global de Afiliados (versão final com Hotmart Hottok integrado)
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
@@ -42,8 +42,14 @@ ROI_MINIMO = float(os.getenv("ROI_MINIMO", "1.2"))
 CAPITAL_MINIMO_PARA_ESCALA = float(os.getenv("CAPITAL_MINIMO_PARA_ESCALA", "10.0"))
 COOLDOWN_HORAS = int(os.getenv("COOLDOWN_HORAS", "1"))
 
-# Webhook secret (env)
+# Webhook secret (env) - usado em integrações que suportem X-ROBO-SECRET
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")
+
+# Hotmart Hottok (coloque em variável de ambiente HOTMART_HOTTOK ou será usado o valor fixo abaixo)
+HOTMART_HOTTOK = os.getenv(
+    "HOTMART_HOTTOK",
+    "QhDArEcdfnX25vSwCBb9cYFD9b4iRhd7b9ee2d-2232-4868-81e3-c5e78fbc37d7"
+)
 
 # =========================================================
 #  MODELOS
@@ -127,17 +133,18 @@ def identificar_plataforma(payload: Dict[str, Any], headers: Dict[str, Any]) -> 
     """
     try:
         # Headers-based hints
-        if headers.get("X-KIWIFY-SIGN") or ("event" in payload and "data" in payload):
+        lowered_payload = json.dumps(payload).lower() if payload else ""
+        if headers.get("X-KIWIFY-SIGN") or ("event" in payload and "data" in payload) or "kiwify" in lowered_payload:
             return "kiwify"
-        if headers.get("X-HOTMART-SIGN") or "hotmart" in json.dumps(payload).lower():
+        if headers.get("X-HOTMART-SIGN") or "hotmart" in lowered_payload or headers.get("X-HOTMART-HOTTOK") or headers.get("HOTTOK") or headers.get("Hottok"):
             return "hotmart"
-        if headers.get("X-EDUZZ-SIGN") or "eduzz" in json.dumps(payload).lower():
+        if headers.get("X-EDUZZ-SIGN") or "eduzz" in lowered_payload:
             return "eduzz"
-        if "monetizze" in json.dumps(payload).lower() or "prod" in payload:
+        if "monetizze" in lowered_payload:
             return "monetizze"
-        if "clickbank" in json.dumps(payload).lower() or "transactionType" in payload:
+        if "clickbank" in lowered_payload:
             return "clickbank"
-        if "digistore" in json.dumps(payload).lower() or "eventType" in payload:
+        if "digistore" in lowered_payload or "digistore24" in lowered_payload:
             return "digistore"
     except Exception:
         pass
@@ -179,19 +186,32 @@ def mapear_evento_plataforma(plataforma: str, payload: Dict[str, Any]) -> Dict[s
             return out
 
         if plataforma == "hotmart":
-            evt = payload.get("event") or payload.get("notification_type") or payload.get("type")
-            data = payload.get("product") or payload
-            out["produto_id"] = data.get("product_id") or data.get("productId") or data.get("id")
-            out["valor"] = data.get("sale_value") or data.get("price")
+            # Hotmart can send different shapes; attempt to extract common fields
+            evt = payload.get("event") or payload.get("notification_type") or payload.get("type") or payload.get("eventType")
+            data = payload.get("resource") or payload.get("product") or payload
+            out["produto_id"] = None
+            # search for probable ids
+            for key in ("product_id", "productId", "id", "resourceId", "prod"):
+                if isinstance(data, dict) and data.get(key):
+                    out["produto_id"] = data.get(key)
+                    break
+            out["valor"] = payload.get("sale_value") or payload.get("price") or (data.get("price") if isinstance(data, dict) else None)
             out["ticket"] = out["valor"]
-            out["comissao"] = data.get("affiliate_commission") or data.get("commission")
-            out["velocidade_pagamento"] = "imediato" if data.get("pay_time") == "instant" else "normal"
-            if "approved" in str(evt).lower():
+            out["comissao"] = payload.get("affiliate_commission") or payload.get("commission") or (data.get("commission") if isinstance(data, dict) else None)
+            out["velocidade_pagamento"] = "imediato" if payload.get("paid_at") or data.get("paid_at") else "normal"
+            if evt and "approved" in str(evt).lower():
                 out["tipo_evento"] = "venda_aprovada"
-            elif "refun" in str(evt).lower():
+            elif evt and ("refund" in str(evt).lower() or "reembolso" in str(evt).lower()):
                 out["tipo_evento"] = "venda_reembolsada"
             else:
-                out["tipo_evento"] = "outro"
+                # try status fields
+                status = payload.get("status") or data.get("status") if isinstance(data, dict) else None
+                if status and str(status).lower() in ["paid", "approved", "pago", "aprovado"]:
+                    out["tipo_evento"] = "venda_aprovada"
+                elif status and str(status).lower() in ["refunded", "chargeback", "estornado"]:
+                    out["tipo_evento"] = "venda_reembolsada"
+                else:
+                    out["tipo_evento"] = "outro"
             return out
 
         if plataforma == "eduzz":
@@ -925,30 +945,72 @@ def escala_automatica():
 async def webhook_universal(request: Request):
     """
     Webhook Universal:
-    - exige header X-ROBO-SECRET == WEBHOOK_SECRET
+    - valida HOTTOK da Hotmart (ou X-ROBO-SECRET)
     - autodetecta a plataforma
     - mapeia e padroniza
     - persiste vendas e métricas padronizadas
     - atualiza ROI quando aplicável
     """
-    # autenticação simples por segredo universal
-    header_secret = request.headers.get("X-ROBO-SECRET", "") or request.query_params.get("secret", "")
-    if not WEBHOOK_SECRET or header_secret != WEBHOOK_SECRET:
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
     try:
+        # ler headers
+        headers = dict(request.headers)
+
+        # autenticacao 1: WEBHOOK_SECRET (genérico)
+        header_secret = headers.get("x-robo-secret") or headers.get("X-ROBO-SECRET") or request.query_params.get("secret", "")
+        if WEBHOOK_SECRET and header_secret and header_secret == WEBHOOK_SECRET:
+            authenticated = True
+        else:
+            authenticated = False
+
+        # autenticacao 2: HOTMART HOTTOK (Hotmart-specific)
+        # Hotmart may send Hottok in different header names; check common variants
+        hottok_header = (
+            headers.get("hottok")
+            or headers.get("Hottok")
+            or headers.get("x-hotmart-hottok")
+            or headers.get("X-HOTMART-HOTTOK")
+            or headers.get("x-hottok")
+            or headers.get("X-HOTTOK")
+        )
+
+        if hottok_header and hottok_header == HOTMART_HOTTOK:
+            authenticated = True
+
+        if not authenticated:
+            # log attempt for debugging (non-blocking)
+            try:
+                supabase.table("webhook_logs").insert({
+                    "received_at": agora_iso(),
+                    "headers": json.dumps(headers),
+                    "note": "unauthenticated",
+                }).execute()
+            except Exception:
+                pass
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+        # parse body
         body = await request.body()
         try:
             payload = json.loads(body.decode("utf-8")) if body else {}
         except Exception:
-            # tentar como form-data ou texto
             payload = {}
 
-        headers = dict(request.headers)
         plataforma = identificar_plataforma(payload, headers)
 
         mapped = mapear_evento_plataforma(plataforma, payload)
         persistir_evento_padronizado(plataforma, mapped)
+
+        # log success (non-blocking)
+        try:
+            supabase.table("webhook_logs").insert({
+                "received_at": agora_iso(),
+                "plataforma": plataforma,
+                "tipo_evento": mapped.get("tipo_evento"),
+                "produto_id": mapped.get("produto_id"),
+                "raw": json.dumps(payload),
+            }).execute()
+        except Exception:
+            pass
 
         # opcional: atualizar ROI do produto se product_id vier
         pid = mapped.get("produto_id")
@@ -962,6 +1024,14 @@ async def webhook_universal(request: Request):
     except HTTPException:
         raise
     except Exception as e:
+        # record unexpected error
+        try:
+            supabase.table("webhook_logs").insert({
+                "received_at": agora_iso(),
+                "error": str(e),
+            }).execute()
+        except Exception:
+            pass
         raise HTTPException(status_code=500, detail=str(e))
 
 
