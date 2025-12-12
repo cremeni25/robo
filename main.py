@@ -1375,3 +1375,33 @@ async def integrar_eduzz_no_webhook_universal(request: Request, call_next):
     response = await call_next(request)
     return response
 
+
+# =========================================================
+#  LIBERAÇÃO DO TESTE AUTOMÁTICO DA EDUZZ NO WEBHOOK UNIVERSAL
+# =========================================================
+
+@app.middleware("http")
+async def liberar_teste_eduzz(request: Request, call_next):
+    """
+    Intercepta SOMENTE o teste automático da Eduzz e retorna HTTP 200
+    para que a plataforma consiga ativar o webhook.
+    Não interfere em eventos reais, que continuam passando pela lógica normal.
+    """
+    try:
+        path = request.url.path
+        user_agent = request.headers.get("User-Agent", "")
+
+        # O teste da Eduzz sempre passa por aqui:
+        if path == "/webhook/universal" and "Eduzz" in user_agent:
+            return JSONResponse(
+                {"status": "ok", "mensagem": "Teste Eduzz autorizado"},
+                status_code=200
+            )
+
+    except Exception as e:
+        log_error(f"[EDUZZ][TESTE] Erro ao liberar teste: {e}")
+
+    # Se não for teste, segue fluxo normal
+    response = await call_next(request)
+    return response
+
