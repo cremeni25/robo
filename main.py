@@ -1328,3 +1328,50 @@ async def processar_evento_eduzz(headers: Dict[str, Any], raw: bytes):
         pass
 
     return evento
+
+
+# =========================================================
+#  ATIVAÇÃO EDUZZ NO WEBHOOK UNIVERSAL
+#  (Adicionar ao final do main.py, após todos os blocos)
+# =========================================================
+
+@app.middleware("http")
+async def integrar_eduzz_no_webhook_universal(request: Request, call_next):
+    """
+    Middleware leve que intercepta apenas chamadas ao webhook universal
+    e aciona o processamento Eduzz quando detectado.
+    Não altera nenhuma lógica existente.
+    """
+    path = request.url.path
+
+    # Apenas monitora o webhook universal
+    if path == "/webhook/universal":
+        try:
+            # Lê headers e corpo cru
+            headers = dict(request.headers)
+            raw_body = await request.body()
+
+            # Detecta se é Eduzz
+            lowered = raw_body.decode("utf-8", errors="ignore").lower()
+            header_keys = " ".join(headers.keys()).lower()
+
+            if (
+                "eduzz" in lowered
+                or "eduzz" in header_keys
+                or headers.get("X-EDUZZ-SIGN")
+                or headers.get("x-eduzz-sign")
+            ):
+                evento = await processar_evento_eduzz(headers, raw_body)
+                return JSONResponse({
+                    "status": "ok",
+                    "plataforma": "eduzz",
+                    "evento": evento.get("tipo_evento")
+                })
+
+        except Exception as e:
+            log_error(f"[EDUZZ][UNIVERSAL] Erro: {e}")
+
+    # Se não for Eduzz, segue fluxo normal
+    response = await call_next(request)
+    return response
+
