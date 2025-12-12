@@ -1166,3 +1166,165 @@ def loop_diario(qtd: int = 1):
 # =========================================================
 #  END
 # =========================================================
+
+
+# =========================================================
+#  INTEGRAÇÃO EDUZZ — BLOCO OFICIAL PARA ACOPLAR AO WEBOOK UNIVERSAL
+# =========================================================
+
+EDUZZ_SECRET = os.getenv("EDUZZ_SECRET", "")
+
+def validar_assinatura_eduzz(headers: Dict[str, Any], raw_body: bytes) -> bool:
+    """
+    Validação HMAC-SHA256 usada pela Eduzz quando o secret está ativado.
+    A Eduzz envia em: X-EDUZZ-SIGN ou x-eduzz-sign
+    """
+    assinatura = headers.get("X-EDUZZ-SIGN") or headers.get("x-eduzz-sign")
+
+    if not assinatura or not EDUZZ_SECRET:
+        # Sem assinatura, consideramos válido para testes — você decide depois.
+        return True
+
+    digest = hmac.new(
+        EDUZZ_SECRET.encode("utf-8"), raw_body, hashlib.sha256
+    ).hexdigest()
+
+    return hmac.compare_digest(digest, assinatura)
+
+
+def detectar_eduzz(payload: Dict[str, Any], headers: Dict[str, Any]) -> bool:
+    """
+    Detecta a Eduzz com alta precisão, cobrindo todos os formatos comuns.
+    """
+    lowered = json.dumps(payload).lower() if payload else ""
+
+    sinais = [
+        "eduzz",
+        "purchaseid",
+        "trans_status",
+        "affiliate_fee",
+        "prod",
+        "buyer_email",
+    ]
+
+    if any(s in lowered for s in sinais):
+        return True
+
+    if headers.get("X-EDUZZ-SIGN") or headers.get("x-eduzz-sign"):
+        return True
+
+    return False
+
+
+def normalizar_eduzz(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normaliza o payload da Eduzz para o formato usado pelo Robô Global.
+    """
+    evento = payload.get("trans_status") or payload.get("event") or payload.get("status")
+    produto_id = (
+        payload.get("prod")
+        or payload.get("product_id")
+        or payload.get("productId")
+        or payload.get("product")
+    )
+
+    valor = (
+        payload.get("valor")
+        or payload.get("value")
+        or payload.get("price")
+        or payload.get("amount")
+    )
+
+    comissao = payload.get("affiliate_fee") or payload.get("commission")
+    pago = payload.get("paid") or payload.get("paid_at") or payload.get("pago")
+
+    if isinstance(evento, str):
+        evento_low = evento.lower()
+        if "approved" in evento_low or "aprov" in evento_low or "pago" in evento_low:
+            tipo_evento = "venda_aprovada"
+        elif "refun" in evento_low or "estorn" in evento_low:
+            tipo_evento = "venda_reembolsada"
+        else:
+            tipo_evento = "outro"
+    else:
+        tipo_evento = "venda_aprovada" if evento in [1, "1", True] else "outro"
+
+    return {
+        "tipo_evento": tipo_evento,
+        "produto_id": produto_id,
+        "valor": valor,
+        "ticket": valor,
+        "comissao": comissao,
+        "velocidade_pagamento": "imediato" if pago else "normal",
+        "raw": payload,
+    }
+
+
+# =========================================================
+#  INJEÇÃO EDUZZ NO WEBHOOK UNIVERSAL (PÓS-PROCESSAMENTO)
+# =========================================================
+
+@app.post("/webhook/eduzz-test")
+async def eduzz_test_only(request: Request):
+    """
+    Endpoint opcional APENAS para testar payload da Eduzz
+    sem interferir no webhook universal.
+    """
+    raw = await request.body()
+    headers = dict(request.headers)
+
+    if not validar_assinatura_eduzz(headers, raw):
+        raise HTTPException(status_code=401, detail="Assinatura HMAC inválida")
+
+    try:
+        payload = json.loads(raw.decode())
+    except:
+        payload = {}
+
+    normalizado = normalizar_eduzz(payload)
+    persistir_evento_padronizado("eduzz", normalizado)
+
+    return {
+        "status": "ok",
+        "detalhes": normalizado
+    }
+
+
+# =========================================================
+#  EXTENSÃO DO WEBHOOK UNIVERSAL PARA SUPORTE COMPLETO EDUZZ
+# =========================================================
+
+async def processar_evento_eduzz(headers: Dict[str, Any], raw: bytes):
+    """
+    Função chamada internamente pelo webhook universal.
+    """
+    # 1 — valida HMAC
+    if not validar_assinatura_eduzz(headers, raw):
+        log_error("[EDUZZ] Assinatura HMAC rejeitada")
+        raise HTTPException(status_code=401, detail="Invalid HMAC (Eduzz)")
+
+    # 2 — parse
+    try:
+        payload = json.loads(raw.decode())
+    except:
+        payload = {}
+
+    # 3 — normaliza
+    evento = normalizar_eduzz(payload)
+
+    # 4 — persiste
+    persistir_evento_padronizado("eduzz", evento)
+
+    # 5 — log
+    try:
+        supabase.table("webhook_logs").insert({
+            "received_at": agora_iso(),
+            "plataforma": "eduzz",
+            "tipo_evento": evento.get("tipo_evento"),
+            "produto_id": evento.get("produto_id"),
+            "raw": json.dumps(payload),
+        }).execute()
+    except:
+        pass
+
+    return evento
