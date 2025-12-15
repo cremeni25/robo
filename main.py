@@ -1727,3 +1727,19 @@ def autorizar_decisao():
         "proximo_passo": "Execução do ciclo liberada"
     }
 
+
+from datetime import datetime
+
+@app.post("/ciclo/executar")
+def executar_ciclo():
+    return {
+        "ciclo_id": "2025-12-15-001",
+        "status": "EXECUTADO",
+        "acoes_realizadas": [
+            "Escala aplicada no produto X",
+            "Capital alocado: R$ 500,00",
+            "Monitoramento ativado"
+        ],
+        "executado_em": datetime.utcnow().isoformat()
+    }
+
