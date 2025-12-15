@@ -950,20 +950,17 @@ async def webhook_universal(request: Request):
     - mapeia e padroniza
     - persiste vendas e métricas padronizadas
     - atualiza ROI quando aplicável
+    - valida efeito pós-confirmação humana
     """
     try:
         # ler headers
         headers = dict(request.headers)
 
-        # autenticacao 1: WEBHOOK_SECRET (genérico)
+        # autenticação 1: WEBHOOK_SECRET (genérico)
         header_secret = headers.get("x-robo-secret") or headers.get("X-ROBO-SECRET") or request.query_params.get("secret", "")
-        if WEBHOOK_SECRET and header_secret and header_secret == WEBHOOK_SECRET:
-            authenticated = True
-        else:
-            authenticated = False
+        authenticated = bool(WEBHOOK_SECRET and header_secret and header_secret == WEBHOOK_SECRET)
 
-        # autenticacao 2: HOTMART HOTTOK (Hotmart-specific)
-        # Hotmart may send Hottok in different header names; check common variants
+        # autenticação 2: HOTMART HOTTOK (Hotmart-specific)
         hottok_header = (
             headers.get("hottok")
             or headers.get("Hottok")
@@ -977,7 +974,6 @@ async def webhook_universal(request: Request):
             authenticated = True
 
         if not authenticated:
-            # log attempt for debugging (non-blocking)
             try:
                 supabase.table("webhook_logs").insert({
                     "received_at": agora_iso(),
@@ -995,12 +991,14 @@ async def webhook_universal(request: Request):
         except Exception:
             payload = {}
 
+        # identificar e mapear
         plataforma = identificar_plataforma(payload, headers)
-
         mapped = mapear_evento_plataforma(plataforma, payload)
+
+        # persistir evento
         persistir_evento_padronizado(plataforma, mapped)
 
-        # log success (non-blocking)
+        # log sucesso
         try:
             supabase.table("webhook_logs").insert({
                 "received_at": agora_iso(),
@@ -1012,7 +1010,7 @@ async def webhook_universal(request: Request):
         except Exception:
             pass
 
-        # opcional: atualizar ROI do produto se product_id vier
+        # atualizar ROI se aplicável
         pid = mapped.get("produto_id")
         if pid:
             try:
@@ -1020,11 +1018,38 @@ async def webhook_universal(request: Request):
             except Exception:
                 pass
 
-        return {"status": "ok", "plataforma": plataforma, "evento": mapped.get("tipo_evento")}
+        # ================================
+        # VALIDAÇÃO DE EFEITO PÓS-CONFIRMAÇÃO
+        # ================================
+        try:
+            validacao = validar_efeito({
+                "plataforma": plataforma,
+                "evento": mapped.get("tipo_evento"),
+                "produto_id": pid,
+                "payload": payload,
+            })
+
+            if validacao.get("validado"):
+                try:
+                    supabase.table("acoes_pendentes").update({
+                        "status": "concluida",
+                        "validada_em": agora_iso(),
+                        "resultado": "efeito_confirmado"
+                    }).eq("produto_id", pid).eq("status", "confirmada").execute()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        return {
+            "status": "ok",
+            "plataforma": plataforma,
+            "evento": mapped.get("tipo_evento")
+        }
+
     except HTTPException:
         raise
     except Exception as e:
-        # record unexpected error
         try:
             supabase.table("webhook_logs").insert({
                 "received_at": agora_iso(),
@@ -1819,3 +1844,16 @@ def confirmar_acao(acao_id: str):
         "acao_id": acao_id,
         "aguardando_validacao": True
     }
+
+
+# ============================================================
+# VALIDAÇÃO DE EFEITO PÓS-CONFIRMAÇÃO (FASE 1 – MOCK CONTROLADO)
+# ============================================================
+def validar_efeito(evento: dict) -> dict:
+    """
+    Confirma se um evento recebido via webhook
+    representa o efeito esperado de uma ação humana confirmada.
+    Nesta fase: validação controlada (mock).
+    """
+    # No futuro: checar tipo_evento, produto_id, timestamp etc.
+    return {"validado": True}
