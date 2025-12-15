@@ -1770,3 +1770,18 @@ def historico_ciclos():
         }
     ]
 
+
+from fastapi import FastAPI
+
+@app.get("/acoes-pendentes")
+def listar_acoes_pendentes():
+    return [
+        {
+            "id": "teste-1",
+            "descricao": "Escalar campanha Hotmart",
+            "risco": "Médio",
+            "motivo": "ROI positivo em 3 ciclos consecutivos",
+            "url_destino": "https://hotmart.com"
+        }
+    ]
+
