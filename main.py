@@ -1879,3 +1879,12 @@ def iniciar_ciclo_controlado():
         pass
 
     return {"status": "ciclo_iniciado"}
+
+
+# --- METAS GLOBAIS (PARÂMETROS) ---
+METAS = {
+    "lucro_mensal": 10000,
+    "roi_minimo": 0.2,
+    "drawdown_max": 0.05,
+    "escala_max_diaria": 0.15
+}
