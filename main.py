@@ -1706,3 +1706,24 @@ async def webhook_monetizze(payload: dict):
     processar_evento(evento)
     return {"status": "ok"}
 
+
+from datetime import datetime
+
+@app.get("/decisao/pendente")
+def decisao_pendente():
+    return {
+        "ciclo_id": "2025-12-15-001",
+        "acao": "Escalar produto X na Hotmart",
+        "motivo": "ROI > 32% | risco baixo",
+        "impacto_estimado": "+R$ 1.420,00",
+        "requer_autorizacao": True
+    }
+
+@app.post("/decisao/autorizar")
+def autorizar_decisao():
+    return {
+        "status": "AUTORIZADO",
+        "executado_em": datetime.utcnow().isoformat(),
+        "proximo_passo": "Execução do ciclo liberada"
+    }
+
