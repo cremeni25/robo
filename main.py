@@ -1809,3 +1809,13 @@ def listar_acoes_pendentes_override():
             "url_destino": "https://hotmart.com"
         }
     ]
+
+
+# --- REGISTRAR CONFIRMAÇÃO (AUDITORIA) ---
+@app.post("/acoes-pendentes/{acao_id}/confirmar")
+def confirmar_acao(acao_id: str):
+    return {
+        "status": "confirmada",
+        "acao_id": acao_id,
+        "aguardando_validacao": True
+    }
