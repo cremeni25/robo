@@ -1755,3 +1755,18 @@ def financeiro_resumo():
         "meta_mes": 3000.00
     }
 
+
+@app.get("/ciclos/historico")
+def historico_ciclos():
+    return [
+        {
+            "ciclo_id": "2025-12-15-001",
+            "status": "EXECUTADO",
+            "acoes": [
+                "Escala aplicada no produto X",
+                "Capital alocado: R$ 500,00"
+            ],
+            "executado_em": "2025-12-15T05:26:28"
+        }
+    ]
+
