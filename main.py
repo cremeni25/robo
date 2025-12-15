@@ -1698,3 +1698,11 @@ async def webhook_eduzz(payload: dict, request: Request):
         print(f"[EDUZZ] [ERROR] {str(e)}")
         raise HTTPException(status_code=400, detail="Erro no webhook Eduzz")
 
+
+@app.post("/webhook/monetizze")
+async def webhook_monetizze(payload: dict):
+    print("[MONETIZZE] [INFO] Webhook recebido")
+    evento = normalizar_evento(payload, origem="monetizze")
+    processar_evento(evento)
+    return {"status": "ok"}
+
