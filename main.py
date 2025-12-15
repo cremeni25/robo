@@ -1785,3 +1785,12 @@ def listar_acoes_pendentes():
         }
     ]
 
+
+from fastapi import FastAPI
+
+@app.post("/acoes-pendentes/{acao_id}/confirmar")
+def confirmar_acao(acao_id: str):
+    return {
+        "status": "confirmada",
+        "acao_id": acao_id
+    }
