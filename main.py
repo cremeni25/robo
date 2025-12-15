@@ -1794,3 +1794,18 @@ def confirmar_acao(acao_id: str):
         "status": "confirmada",
         "acao_id": acao_id
     }
+
+
+# --- OVERRIDE SEGURO: AÇÕES PENDENTES COM IMPACTO ---
+@app.get("/acoes-pendentes")
+def listar_acoes_pendentes_override():
+    return [
+        {
+            "id": "teste-1",
+            "descricao": "Escalar campanha Hotmart",
+            "risco": "Médio",
+            "motivo": "ROI positivo em 3 ciclos consecutivos",
+            "impacto": "+R$ 2.400 / mês",
+            "url_destino": "https://hotmart.com"
+        }
+    ]
