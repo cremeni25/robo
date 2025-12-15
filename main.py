@@ -1888,3 +1888,11 @@ METAS = {
     "drawdown_max": 0.05,
     "escala_max_diaria": 0.15
 }
+
+
+# --- PORTFÓLIO DE PRODUTOS ---
+PORTFOLIO = [
+    {"produto_id": "p1", "plataforma": "hotmart", "ativo": True},
+    {"produto_id": "p2", "plataforma": "eduzz", "ativo": True},
+    {"produto_id": "p3", "plataforma": "hotmart", "ativo": False}
+]
