@@ -1912,3 +1912,21 @@ def listar_acoes_pendentes_priorizadas():
             "url_destino": "https://hotmart.com"
         }
     ]
+
+
+# --- AÇÕES PENDENTES COM SLA ---
+@app.get("/acoes-pendentes")
+def listar_acoes_pendentes_sla():
+    return [
+        {
+            "id": "acao-1",
+            "descricao": "Escalar campanha Hotmart",
+            "risco": 3,                 # 1=baixo,2=médio,3=alto
+            "impacto_valor": 2400,
+            "impacto": "+R$ 2.400 / mês",
+            "motivo": "ROI positivo em 3 ciclos",
+            "url_destino": "https://hotmart.com",
+            "sla_minutos": 60,          # prazo máximo
+            "criada_em": agora_iso()
+        }
+    ]
