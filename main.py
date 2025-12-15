@@ -1857,3 +1857,25 @@ def validar_efeito(evento: dict) -> dict:
     """
     # No futuro: checar tipo_evento, produto_id, timestamp etc.
     return {"validado": True}
+
+
+# --- DISPARO MANUAL DO CICLO (CONTROLE) ---
+@app.post("/ciclo/iniciar")
+def iniciar_ciclo_controlado():
+    # cria 1 ação pendente real (teste controlado)
+    try:
+        supabase.table("acoes_pendentes").insert({
+            "id": "acao-ciclo-1",
+            "descricao": "Ajustar orçamento campanha X",
+            "plataforma": "hotmart",
+            "risco": "Médio",
+            "motivo": "ROI consistente em 3 ciclos",
+            "impacto": "+R$ 1.800 / mês",
+            "status": "pendente",
+            "criada_em": agora_iso(),
+            "url_destino": "https://hotmart.com"
+        }).execute()
+    except Exception:
+        pass
+
+    return {"status": "ciclo_iniciado"}
