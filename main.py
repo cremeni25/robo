@@ -1896,3 +1896,19 @@ PORTFOLIO = [
     {"produto_id": "p2", "plataforma": "eduzz", "ativo": True},
     {"produto_id": "p3", "plataforma": "hotmart", "ativo": False}
 ]
+
+
+# --- AÇÕES PENDENTES COM PRIORIDADE ---
+@app.get("/acoes-pendentes")
+def listar_acoes_pendentes_priorizadas():
+    return [
+        {
+            "id": "acao-1",
+            "descricao": "Escalar campanha Hotmart",
+            "risco": 2,            # 1=baixo, 2=médio, 3=alto
+            "impacto_valor": 2400, # número para ordenar
+            "impacto": "+R$ 2.400 / mês",
+            "motivo": "ROI positivo em 3 ciclos",
+            "url_destino": "https://hotmart.com"
+        }
+    ]
