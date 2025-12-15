@@ -1743,3 +1743,15 @@ def executar_ciclo():
         "executado_em": datetime.utcnow().isoformat()
     }
 
+
+@app.get("/financeiro/resumo")
+def financeiro_resumo():
+    return {
+        "capital_disponivel": 3200.00,
+        "capital_em_uso": 500.00,
+        "comissoes_hoje": 180.50,
+        "comissoes_mes": 1240.30,
+        "escala_atual": "Produto X - Hotmart",
+        "meta_mes": 3000.00
+    }
+
