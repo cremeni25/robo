@@ -339,19 +339,21 @@ def validar_hmac(secret: str, payload: bytes, assinatura: str) -> bool:
 @app.post("/webhook/universal")
 async def webhook_universal(request: Request):
     payload = await request.json()
+
     evento = EventoUniversal(
         origem="universal",
         evento=payload.get("event", "desconhecido"),
         payload=payload
     )
+
     registrar_evento_universal(evento)
 
     evento_norm = normalizar_evento("universal", payload)
-   resultado = pipeline_operacional(evento_norm)
-registrar_operacao(resultado)
-
+    resultado = pipeline_operacional(evento_norm)
+    registrar_operacao(resultado)
 
     return {"status": "OK"}
+
 
 # =========================================================
 # WEBHOOK HOTMART
