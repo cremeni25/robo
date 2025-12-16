@@ -2722,3 +2722,85 @@ registrar_evento(
 # ============================================================
 # FIM DA AÇÃO 32
 # ============================================================
+
+
+# ================================
+# ETAPA 1 — DECISÃO E CONTEÚDO
+# ================================
+
+from datetime import datetime
+from typing import Optional
+from fastapi import Body
+
+# ----------------
+# MODELOS INTERNOS
+# ----------------
+
+def decidir_conteudo():
+    """
+    Robô decide autonomamente o tipo e objetivo do conteúdo.
+    """
+    return {
+        "objetivo": "autoridade",
+        "formato": "post_educativo",
+        "tema": "autonomia financeira com IA",
+        "canal_futuro": "social_media",
+        "tom": "claro_direto",
+    }
+
+
+def gerar_conteudo(decisao):
+    """
+    Robô gera o conteúdo com base na decisão.
+    """
+    texto = (
+        "Um robô verdadeiramente autônomo não pede permissão para pensar.\n\n"
+        "Ele analisa dados, decide ações e apenas solicita confirmação humana "
+        "quando a lei ou a ética exigem.\n\n"
+        "Isso não é futuro. Já está acontecendo."
+    )
+
+    return {
+        "titulo": "IA Autônoma: o novo padrão",
+        "conteudo": texto,
+        "decisao_base": decisao,
+        "criado_em": datetime.utcnow().isoformat()
+    }
+
+
+def registrar_acao_pendente(conteudo):
+    """
+    Registra ação pendente de publicação.
+    """
+    return {
+        "status": "PENDENTE_CONFIRMACAO",
+        "acao": "PUBLICAR_CONTEUDO",
+        "payload": conteudo,
+        "criado_em": datetime.utcnow().isoformat()
+    }
+
+
+# ----------------
+# ENDPOINTS
+# ----------------
+
+@app.post("/conteudo/decidir")
+def endpoint_decidir_conteudo():
+    decisao = decidir_conteudo()
+    return {"status": "OK", "decisao": decisao}
+
+
+@app.post("/conteudo/gerar")
+def endpoint_gerar_conteudo():
+    decisao = decidir_conteudo()
+    conteudo = gerar_conteudo(decisao)
+    return {"status": "OK", "conteudo": conteudo}
+
+
+@app.post("/conteudo/acao-pendente")
+def endpoint_acao_pendente():
+    decisao = decidir_conteudo()
+    conteudo = gerar_conteudo(decisao)
+    acao = registrar_acao_pendente(conteudo)
+    return {"status": "OK", "acao_pendente": acao}
+
