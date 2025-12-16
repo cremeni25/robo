@@ -1233,3 +1233,21 @@ def processar_evento_com_registro(evento_normalizado):
     resultado = processar_evento(evento_normalizado)
     registrar_operacao(resultado)
     return resultado
+
+
+# ================================
+# ATIVAÇÃO FINAL – SEM EDITAR ENDPOINTS
+# ================================
+
+_processar_evento_original = processar_evento
+
+def processar_evento(evento_normalizado):
+    """
+    Override protocolar:
+    mantém assinatura original
+    adiciona registro no ciclo
+    """
+    resultado = _processar_evento_original(evento_normalizado)
+    registrar_operacao(resultado)
+    return resultado
+
