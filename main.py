@@ -1930,3 +1930,120 @@ def listar_acoes_pendentes_sla():
             "criada_em": agora_iso()
         }
     ]
+
+
+# ============================================================
+# AÇÃO 16 — ALERTAS EXTERNOS POR SLA
+# Inclusão obrigatória NO FINAL do main.py
+# ============================================================
+
+import time
+import asyncio
+import httpx
+from typing import Dict, Optional
+from datetime import datetime, timedelta
+
+# -----------------------------
+# CONFIGURAÇÃO DE SLA (em segundos)
+# -----------------------------
+SLA_LIMITS = {
+    "webhook_processamento": 5,      # ex: webhook deve concluir em até 5s
+    "decisao_estrategica": 10,        # decisão do robô
+    "ciclo_operacional": 30,          # ciclo completo
+    "registro_supabase": 5            # escrita em banco
+}
+
+# -----------------------------
+# ENDPOINT EXTERNO DE ALERTA
+# (exemplo genérico — pode ser trocado sem impacto interno)
+# -----------------------------
+ALERTA_EXTERNO_URL = os.getenv(
+    "ALERTA_EXTERNO_URL",
+    "https://example.com/alerta-sla"
+)
+
+# -----------------------------
+# REGISTRO DE SLA EM MEMÓRIA
+# -----------------------------
+sla_tracker: Dict[str, Dict] = {}
+
+
+def iniciar_sla(id_evento: str, tipo: str):
+    sla_tracker[id_evento] = {
+        "tipo": tipo,
+        "inicio": time.time(),
+        "limite": SLA_LIMITS.get(tipo),
+        "finalizado": False
+    }
+    logger.info(f"[SLA] [INFO] SLA iniciado | evento={id_evento} tipo={tipo}")
+
+
+async def finalizar_sla(id_evento: str):
+    evento = sla_tracker.get(id_evento)
+    if not evento or evento["finalizado"]:
+        return
+
+    duracao = time.time() - evento["inicio"]
+    evento["finalizado"] = True
+
+    if evento["limite"] and duracao > evento["limite"]:
+        await disparar_alerta_sla(
+            id_evento=id_evento,
+            tipo=evento["tipo"],
+            duracao=duracao,
+            limite=evento["limite"]
+        )
+    else:
+        logger.info(
+            f"[SLA] [OK] Dentro do SLA | evento={id_evento} "
+            f"duracao={duracao:.2f}s"
+        )
+
+
+async def disparar_alerta_sla(
+    id_evento: str,
+    tipo: str,
+    duracao: float,
+    limite: int
+):
+    payload = {
+        "origem": "Robo Global AI",
+        "evento_id": id_evento,
+        "tipo": tipo,
+        "duracao_segundos": round(duracao, 2),
+        "sla_limite": limite,
+        "timestamp": datetime.utcnow().isoformat(),
+        "nivel": "CRITICO"
+    }
+
+    logger.error(
+        f"[SLA] [ALERTA] SLA VIOLADO | evento={id_evento} "
+        f"tipo={tipo} duracao={duracao:.2f}s limite={limite}s"
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            await client.post(ALERTA_EXTERNO_URL, json=payload)
+    except Exception as e:
+        logger.error(f"[SLA] [ERRO] Falha ao enviar alerta externo: {e}")
+
+
+# -----------------------------
+# DECORADOR PARA MEDIR SLA
+# -----------------------------
+def monitorar_sla(tipo: str):
+    def decorator(func):
+        async def wrapper(*args, **kwargs):
+            evento_id = f"{tipo}_{int(time.time()*1000)}"
+            iniciar_sla(evento_id, tipo)
+            try:
+                resultado = await func(*args, **kwargs)
+                return resultado
+            finally:
+                await finalizar_sla(evento_id)
+        return wrapper
+    return decorator
+
+# ============================================================
+# FIM DA AÇÃO 16
+# ============================================================
