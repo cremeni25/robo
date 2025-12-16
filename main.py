@@ -2804,3 +2804,16 @@ def endpoint_acao_pendente():
     acao = registrar_acao_pendente(conteudo)
     return {"status": "OK", "acao_pendente": acao}
 
+
+# ==========================================================
+# LOGGER GLOBAL (CORREÇÃO DEPLOY)
+# ==========================================================
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] [%(levelname)s] %(message)s"
+)
+
+logger = logging.getLogger("robo_global")
+
