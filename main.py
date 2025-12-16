@@ -2299,3 +2299,57 @@ def registrar_confirmacao_obrigatoria(tipo: str, descricao: str, payload: dict):
 # ============================================================
 
 
+# ============================================================
+# AÇÃO 23 — MÉTRICAS OPERACIONAIS DO ROBÔ
+# Inclusão obrigatória NO FINAL do main.py
+# ============================================================
+
+metricas = {
+    "decisoes_total": 0,
+    "decisoes_por_tipo": {},
+    "ciclos_executados": 0,
+    "alertas_sla": 0,
+    "confirmacoes_humanas": 0
+}
+
+
+def registrar_decisao(tipo: str):
+    metricas["decisoes_total"] += 1
+    metricas["decisoes_por_tipo"].setdefault(tipo, 0)
+    metricas["decisoes_por_tipo"][tipo] += 1
+    registrar_evento(
+        origem="decisao",
+        tipo=tipo,
+        descricao="Decisão estratégica executada"
+    )
+
+
+def registrar_ciclo():
+    metricas["ciclos_executados"] += 1
+    registrar_evento(
+        origem="ciclo",
+        tipo="CICLO",
+        descricao="Ciclo operacional executado"
+    )
+
+
+def registrar_alerta():
+    metricas["alertas_sla"] += 1
+
+
+def registrar_confirmacao():
+    metricas["confirmacoes_humanas"] += 1
+
+
+@app.get("/metricas")
+async def obter_metricas():
+    return {
+        "status": "OK",
+        "metricas": metricas
+    }
+
+# ============================================================
+# FIM DA AÇÃO 23
+# ============================================================
+
+
