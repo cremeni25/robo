@@ -2859,3 +2859,17 @@ def persistir_historico_supabase(evento):
         _safe_logger.error(f"[SUPABASE] ERRO IGNORADO (fail-safe): {e}")
         return False
 
+
+# ================================
+# PATCH DEFINITIVO — LOGGER GLOBAL
+# ================================
+
+import builtins
+import logging
+
+if not hasattr(builtins, "logger"):
+    logging.basicConfig(
+        level=logging.INFO,
+        format="[ROBO GLOBAL] [%(levelname)s] %(message)s"
+    )
+    builtins.logger = logging.getLogger("robo_global")
