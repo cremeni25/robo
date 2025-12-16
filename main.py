@@ -2429,3 +2429,30 @@ async def exportar_csv():
 # ============================================================
 # FIM DA AÇÃO 25
 # ============================================================
+
+
+# ============================================================
+# AÇÃO 26 — CONTROLE DE VERSÃO OPERACIONAL
+# Inclusão obrigatória NO FINAL do main.py
+# ============================================================
+
+ROBO_VERSION = os.getenv("ROBO_VERSION", "v1.0.0")
+ROBO_BUILD = os.getenv("ROBO_BUILD", "2025-01-01")
+ROBO_RELEASE_NOTES = os.getenv(
+    "ROBO_RELEASE_NOTES",
+    "Inicialização do ciclo operacional autônomo"
+)
+
+@app.get("/versao")
+async def versao_robo():
+    return {
+        "status": "OK",
+        "versao": ROBO_VERSION,
+        "build": ROBO_BUILD,
+        "release_notes": ROBO_RELEASE_NOTES,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+# ============================================================
+# FIM DA AÇÃO 26
+# ============================================================
