@@ -1216,3 +1216,20 @@ async def iniciar_autoajuste():
 # =========================================================
 
 log_info("🚀 Robo Global AI 100% AUTÔNOMO • PROATIVO • COM GOVERNANÇA 🚀")
+
+
+# ================================
+# CORREÇÃO CIRÚRGICA – LIGAÇÃO CICLO
+# Inclusão protocolar no FINAL
+# ================================
+
+def processar_evento_com_registro(evento_normalizado):
+    """
+    Wrapper protocolar:
+    - Não altera endpoints
+    - Não refatora arquitetura
+    - Apenas liga processamento ao ciclo
+    """
+    resultado = processar_evento(evento_normalizado)
+    registrar_operacao(resultado)
+    return resultado
