@@ -2088,3 +2088,57 @@ async def listar_alertas_sla():
 # ============================================================
 # FIM DA AÇÃO 17 — BACKEND
 # ============================================================
+
+
+# ============================================================
+# AÇÃO 18 — FILA DE CONFIRMAÇÕES HUMANAS
+# Inclusão obrigatória NO FINAL do main.py
+# ============================================================
+
+from uuid import uuid4
+
+fila_confirmacoes = []
+
+def registrar_confirmacao_obrigatoria(tipo: str, descricao: str, payload: dict):
+    item = {
+        "id": str(uuid4()),
+        "tipo": tipo,
+        "descricao": descricao,
+        "payload": payload,
+        "status": "AGUARDANDO",
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    fila_confirmacoes.append(item)
+    logger.warning(
+        f"[CONFIRMACAO] [AGUARDANDO] tipo={tipo} id={item['id']}"
+    )
+    return item["id"]
+
+
+@app.get("/confirmacoes-pendentes")
+async def listar_confirmacoes():
+    pendentes = [
+        c for c in fila_confirmacoes if c["status"] == "AGUARDANDO"
+    ]
+    return {
+        "status": "OK",
+        "total": len(pendentes),
+        "confirmacoes": pendentes
+    }
+
+
+@app.post("/confirmar/{confirmacao_id}")
+async def confirmar_acao(confirmacao_id: str):
+    for c in fila_confirmacoes:
+        if c["id"] == confirmacao_id:
+            c["status"] = "CONFIRMADO"
+            c["confirmado_em"] = datetime.utcnow().isoformat()
+            logger.info(
+                f"[CONFIRMACAO] [CONFIRMADA] id={confirmacao_id}"
+            )
+            return {"status": "CONFIRMADO"}
+    raise HTTPException(status_code=404, detail="Confirmação não encontrada")
+
+# ============================================================
+# FIM DA AÇÃO 18 — BACKEND
+# ============================================================
