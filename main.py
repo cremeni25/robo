@@ -2485,3 +2485,49 @@ async def bloquear_metodos_em_modo_leitura(request, call_next):
 # FIM DA AÇÃO 27
 # ============================================================
 
+
+# ============================================================
+# AÇÃO 28 — ESCALADA AUTOMÁTICA DE INCIDENTES
+# Inclusão obrigatória NO FINAL do main.py
+# ============================================================
+
+INCIDENTES = []
+
+def registrar_incidente(nivel: str, origem: str, mensagem: str, contexto: dict = None):
+    incidente = {
+        "id": str(uuid4()),
+        "nivel": nivel,  # INFO | ATENCAO | CRITICO
+        "origem": origem,
+        "mensagem": mensagem,
+        "contexto": contexto or {},
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    INCIDENTES.append(incidente)
+    registrar_evento(
+        origem="incidente",
+        tipo=nivel,
+        descricao=mensagem,
+        dados=contexto
+    )
+    if nivel == "CRITICO":
+        asyncio.create_task(
+            disparar_alerta_sla(
+                id_evento=incidente["id"],
+                tipo="incidente_critico",
+                duracao=999,
+                limite=0
+            )
+        )
+
+@app.get("/incidentes")
+async def listar_incidentes():
+    return {
+        "status": "OK",
+        "total": len(INCIDENTES),
+        "incidentes": INCIDENTES[-100:][::-1]
+    }
+
+# ============================================================
+# FIM DA AÇÃO 28
+# ============================================================
+
