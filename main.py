@@ -2047,3 +2047,44 @@ def monitorar_sla(tipo: str):
 # ============================================================
 # FIM DA AÇÃO 16
 # ============================================================
+
+
+# ============================================================
+# AÇÃO 17 — ENDPOINT DE ALERTAS DE SLA
+# Inclusão obrigatória NO FINAL do main.py
+# ============================================================
+
+@app.get("/alertas-sla")
+async def listar_alertas_sla():
+    alertas = []
+
+    for evento_id, dados in sla_tracker.items():
+        if dados.get("finalizado") and dados.get("limite"):
+            duracao = (
+                time.time() - dados["inicio"]
+                if not dados["finalizado"]
+                else None
+            )
+
+            if dados["finalizado"]:
+                excesso = (
+                    (time.time() - dados["inicio"]) - dados["limite"]
+                )
+                if excesso > 0:
+                    alertas.append({
+                        "evento_id": evento_id,
+                        "tipo": dados["tipo"],
+                        "sla_limite": dados["limite"],
+                        "status": "VIOLADO",
+                        "timestamp": datetime.utcnow().isoformat()
+                    })
+
+    return {
+        "status": "OK",
+        "total": len(alertas),
+        "alertas": alertas
+    }
+
+# ============================================================
+# FIM DA AÇÃO 17 — BACKEND
+# ============================================================
