@@ -2240,3 +2240,62 @@ async def health():
 # FIM DA AÇÃO 21 — BACKEND
 # ============================================================
 
+
+# ============================================================
+# AÇÃO 22 — PERSISTÊNCIA NO SUPABASE (HISTÓRICO + CONFIRMAÇÕES)
+# Inclusão obrigatória NO FINAL do main.py
+# ============================================================
+
+def persistir_historico_supabase(evento: dict):
+    try:
+        supabase.table("historico_eventos").insert(evento).execute()
+        logger.info("[SUPABASE] [OK] Histórico persistido")
+    except Exception as e:
+        logger.error(f"[SUPABASE] [ERRO] Histórico não persistido: {e}")
+
+
+def persistir_confirmacao_supabase(confirmacao: dict):
+    try:
+        supabase.table("confirmacoes_humanas").insert(confirmacao).execute()
+        logger.info("[SUPABASE] [OK] Confirmação persistida")
+    except Exception as e:
+        logger.error(f"[SUPABASE] [ERRO] Confirmação não persistida: {e}")
+
+
+# HOOK AUTOMÁTICO NO REGISTRO DE EVENTO
+_evento_original = registrar_evento
+def registrar_evento(origem: str, tipo: str, descricao: str, dados: dict = None):
+    evento = {
+        "id": str(uuid4()),
+        "origem": origem,
+        "tipo": tipo,
+        "descricao": descricao,
+        "dados": dados or {},
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    historico_eventos.append(evento)
+    persistir_historico_supabase(evento)
+    logger.info(f"[HISTORICO] [EVENTO] origem={origem} tipo={tipo}")
+
+
+# HOOK AUTOMÁTICO NA CONFIRMAÇÃO
+_confirmacao_original = registrar_confirmacao_obrigatoria
+def registrar_confirmacao_obrigatoria(tipo: str, descricao: str, payload: dict):
+    item = {
+        "id": str(uuid4()),
+        "tipo": tipo,
+        "descricao": descricao,
+        "payload": payload,
+        "status": "AGUARDANDO",
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    fila_confirmacoes.append(item)
+    persistir_confirmacao_supabase(item)
+    logger.warning(f"[CONFIRMACAO] [AGUARDANDO] tipo={tipo} id={item['id']}")
+    return item["id"]
+
+# ============================================================
+# FIM DA AÇÃO 22
+# ============================================================
+
+
