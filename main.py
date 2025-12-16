@@ -2182,3 +2182,61 @@ async def listar_historico():
 # ============================================================
 # FIM DA AÇÃO 19 — BACKEND
 # ============================================================
+
+
+# ============================================================
+# AÇÃO 21 — HEALTHCHECK CONTÍNUO DO ROBÔ
+# Inclusão obrigatória NO FINAL do main.py
+# ============================================================
+
+health_status = {
+    "api": "OK",
+    "ultimo_check": None,
+    "erros": 0
+}
+
+async def executar_healthcheck():
+    while True:
+        try:
+            health_status["ultimo_check"] = datetime.utcnow().isoformat()
+            health_status["api"] = "OK"
+            health_status["erros"] = 0
+            registrar_evento(
+                origem="healthcheck",
+                tipo="STATUS",
+                descricao="Healthcheck executado com sucesso"
+            )
+        except Exception as e:
+            health_status["api"] = "DEGRADADO"
+            health_status["erros"] += 1
+            registrar_evento(
+                origem="healthcheck",
+                tipo="ERRO",
+                descricao=str(e)
+            )
+            await disparar_alerta_sla(
+                id_evento="healthcheck",
+                tipo="healthcheck",
+                duracao=999,
+                limite=0
+            )
+        await asyncio.sleep(60)
+
+
+@app.on_event("startup")
+async def iniciar_healthcheck():
+    asyncio.create_task(executar_healthcheck())
+
+
+@app.get("/health")
+async def health():
+    return {
+        "status": health_status["api"],
+        "ultimo_check": health_status["ultimo_check"],
+        "erros": health_status["erros"]
+    }
+
+# ============================================================
+# FIM DA AÇÃO 21 — BACKEND
+# ============================================================
+
