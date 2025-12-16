@@ -1251,3 +1251,23 @@ def processar_evento(evento_normalizado):
     registrar_operacao(resultado)
     return resultado
 
+
+# ================================
+# ATIVAÇÃO FINAL – SAFE OVERRIDE
+# ================================
+
+if "processar_evento" in globals():
+
+    _processar_evento_original = processar_evento
+
+    def processar_evento(evento_normalizado):
+        """
+        Override protocolar seguro:
+        - só executa se a função existir
+        - não quebra import
+        - liga ao ciclo
+        """
+        resultado = _processar_evento_original(evento_normalizado)
+        registrar_operacao(resultado)
+        return resultado
+
