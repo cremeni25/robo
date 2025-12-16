@@ -2577,3 +2577,66 @@ def registrar_incidente(nivel: str, origem: str, mensagem: str, contexto: dict =
 # FIM DA AÇÃO 29
 # ============================================================
 
+
+# ============================================================
+# AÇÃO 30 — POLÍTICA DE RETENÇÃO DE DADOS
+# Inclusão obrigatória NO FINAL do main.py
+# ============================================================
+
+RETENCAO_DIAS = {
+    "historico_eventos": 180,
+    "incidentes": 365,
+    "confirmacoes_humanas": 90
+}
+
+async def executar_cleanup():
+    while True:
+        agora = datetime.utcnow()
+
+        try:
+            # HISTÓRICO
+            limite_hist = agora - timedelta(days=RETENCAO_DIAS["historico_eventos"])
+            supabase.table("historico_eventos") \
+                .delete() \
+                .lt("timestamp", limite_hist.isoformat()) \
+                .execute()
+
+            # INCIDENTES
+            limite_inc = agora - timedelta(days=RETENCAO_DIAS["incidentes"])
+            supabase.table("incidentes") \
+                .delete() \
+                .lt("timestamp", limite_inc.isoformat()) \
+                .execute()
+
+            # CONFIRMAÇÕES
+            limite_conf = agora - timedelta(days=RETENCAO_DIAS["confirmacoes_humanas"])
+            supabase.table("confirmacoes_humanas") \
+                .delete() \
+                .lt("timestamp", limite_conf.isoformat()) \
+                .execute()
+
+            registrar_evento(
+                origem="retencao",
+                tipo="CLEANUP",
+                descricao="Limpeza automática executada com sucesso"
+            )
+
+        except Exception as e:
+            registrar_incidente(
+                nivel="ATENCAO",
+                origem="retencao",
+                mensagem=str(e)
+            )
+
+        await asyncio.sleep(86400)  # 1x por dia
+
+
+@app.on_event("startup")
+async def iniciar_retencao():
+    asyncio.create_task(executar_cleanup())
+
+# ============================================================
+# FIM DA AÇÃO 30
+# ============================================================
+
+
