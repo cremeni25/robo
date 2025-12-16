@@ -2531,3 +2531,49 @@ async def listar_incidentes():
 # FIM DA AÇÃO 28
 # ============================================================
 
+
+# ============================================================
+# AÇÃO 29 — PERSISTÊNCIA DE INCIDENTES NO SUPABASE
+# Inclusão obrigatória NO FINAL do main.py
+# ============================================================
+
+def persistir_incidente_supabase(incidente: dict):
+    try:
+        supabase.table("incidentes").insert(incidente).execute()
+        logger.info("[SUPABASE] [OK] Incidente persistido")
+    except Exception as e:
+        logger.error(f"[SUPABASE] [ERRO] Incidente não persistido: {e}")
+
+
+_incidente_original = registrar_incidente
+def registrar_incidente(nivel: str, origem: str, mensagem: str, contexto: dict = None):
+    incidente = {
+        "id": str(uuid4()),
+        "nivel": nivel,
+        "origem": origem,
+        "mensagem": mensagem,
+        "contexto": contexto or {},
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    INCIDENTES.append(incidente)
+    persistir_incidente_supabase(incidente)
+    registrar_evento(
+        origem="incidente",
+        tipo=nivel,
+        descricao=mensagem,
+        dados=contexto
+    )
+    if nivel == "CRITICO":
+        asyncio.create_task(
+            disparar_alerta_sla(
+                id_evento=incidente["id"],
+                tipo="incidente_critico",
+                duracao=999,
+                limite=0
+            )
+        )
+
+# ============================================================
+# FIM DA AÇÃO 29
+# ============================================================
+
