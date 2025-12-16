@@ -2640,3 +2640,57 @@ async def iniciar_retencao():
 # ============================================================
 
 
+# ============================================================
+# AÇÃO 31 — SNAPSHOT DIÁRIO AUTOMÁTICO
+# Inclusão obrigatória NO FINAL do main.py
+# ============================================================
+
+def persistir_snapshot_supabase(snapshot: dict):
+    try:
+        supabase.table("snapshots_diarios").insert(snapshot).execute()
+        logger.info("[SUPABASE] [OK] Snapshot diário persistido")
+    except Exception as e:
+        logger.error(f"[SUPABASE] [ERRO] Snapshot não persistido: {e}")
+
+
+async def executar_snapshot_diario():
+    while True:
+        try:
+            snapshot = {
+                "id": str(uuid4()),
+                "timestamp": datetime.utcnow().isoformat(),
+                "health": health_status,
+                "metricas": metricas,
+                "confirmacoes_pendentes": len(
+                    [c for c in fila_confirmacoes if c["status"] == "AGUARDANDO"]
+                ),
+                "historico_total": len(historico_eventos)
+            }
+
+            persistir_snapshot_supabase(snapshot)
+
+            registrar_evento(
+                origem="snapshot",
+                tipo="DIARIO",
+                descricao="Snapshot diário gerado"
+            )
+
+        except Exception as e:
+            registrar_incidente(
+                nivel="ATENCAO",
+                origem="snapshot",
+                mensagem=str(e)
+            )
+
+        await asyncio.sleep(86400)  # 1x por dia
+
+
+@app.on_event("startup")
+async def iniciar_snapshot_diario():
+    asyncio.create_task(executar_snapshot_diario())
+
+# ============================================================
+# FIM DA AÇÃO 31
+# ============================================================
+
+
