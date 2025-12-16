@@ -2353,3 +2353,34 @@ async def obter_metricas():
 # ============================================================
 
 
+# ============================================================
+# AÇÃO 24 — SNAPSHOT OPERACIONAL DO ROBÔ
+# Inclusão obrigatória NO FINAL do main.py
+# ============================================================
+
+@app.get("/snapshot")
+async def snapshot_operacional():
+    return {
+        "status": "OK",
+        "timestamp": datetime.utcnow().isoformat(),
+        "health": health_status,
+        "metricas": metricas,
+        "sla_ativos": [
+            {
+                "evento_id": k,
+                "tipo": v["tipo"],
+                "inicio": v["inicio"],
+                "limite": v["limite"]
+            }
+            for k, v in sla_tracker.items()
+            if not v.get("finalizado")
+        ],
+        "confirmacoes_pendentes": len(
+            [c for c in fila_confirmacoes if c["status"] == "AGUARDANDO"]
+        ),
+        "historico_total": len(historico_eventos)
+    }
+
+# ============================================================
+# FIM DA AÇÃO 24
+# ============================================================
