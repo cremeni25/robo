@@ -2456,3 +2456,32 @@ async def versao_robo():
 # ============================================================
 # FIM DA AÇÃO 26
 # ============================================================
+
+
+# ============================================================
+# AÇÃO 27 — MODO SOMENTE-LEITURA (READ ONLY MODE)
+# Inclusão obrigatória NO FINAL do main.py
+# ============================================================
+
+READ_ONLY_MODE = True  # padrão: ativo
+
+@app.middleware("http")
+async def bloquear_metodos_em_modo_leitura(request, call_next):
+    if READ_ONLY_MODE:
+        if request.method in ["POST", "PUT", "DELETE"]:
+            # exceção explícita: confirmação humana
+            if request.url.path.startswith("/confirmar/"):
+                return await call_next(request)
+            logger.warning(
+                f"[SEGURANCA] [BLOQUEADO] tentativa {request.method} em {request.url.path}"
+            )
+            raise HTTPException(
+                status_code=403,
+                detail="Modo somente-leitura ativo"
+            )
+    return await call_next(request)
+
+# ============================================================
+# FIM DA AÇÃO 27
+# ============================================================
+
