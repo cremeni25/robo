@@ -2694,3 +2694,31 @@ async def iniciar_snapshot_diario():
 # ============================================================
 
 
+# ============================================================
+# AÇÃO 32 — CONGELAMENTO DO CICLO OPERACIONAL
+# Inclusão obrigatória NO FINAL do main.py
+# ============================================================
+
+ESTADO_OPERACIONAL = {
+    "estado": "OPERACIONAL_ESTAVEL",
+    "ciclo_congelado": True,
+    "timestamp": datetime.utcnow().isoformat(),
+    "descricao": "Ciclo completo. Robô operando de forma autônoma e estável."
+}
+
+@app.get("/estado")
+async def estado_robo():
+    return {
+        "status": "OK",
+        "estado_operacional": ESTADO_OPERACIONAL
+    }
+
+registrar_evento(
+    origem="sistema",
+    tipo="CONGELAMENTO",
+    descricao="Ciclo congelado. Estado OPERACIONAL ESTÁVEL atingido."
+)
+
+# ============================================================
+# FIM DA AÇÃO 32
+# ============================================================
