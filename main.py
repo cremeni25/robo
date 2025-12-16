@@ -524,3 +524,265 @@ async def iniciar_ciclo():
 # =========================================================
 
 log_info("main.py carregado completamente. Robo Global AI OPERACIONAL.")
+
+
+# =========================================================
+# MÓDULO 1 — VARREDURA REAL DE MARKETPLACES
+# =========================================================
+
+MARKETPLACES = {
+    "hotmart": {
+        "catalog_url": "https://api.hotmart.com/v2/products",
+        "headers": lambda: {"Authorization": f"Bearer {os.getenv('HOTMART_TOKEN', '')}"}
+    },
+    "eduzz": {
+        "catalog_url": "https://api.eduzz.com/catalog",
+        "headers": lambda: {"Authorization": f"Bearer {os.getenv('EDUZZ_TOKEN', '')}"}
+    },
+    "kiwify": {
+        "catalog_url": "https://api.kiwify.com.br/products",
+        "headers": lambda: {"Authorization": f"Bearer {os.getenv('KIWIFY_TOKEN', '')}"}
+    }
+}
+
+def varrer_marketplace(nome: str, cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
+    produtos = []
+    try:
+        r = requests.get(cfg["catalog_url"], headers=cfg["headers"](), timeout=15)
+        if r.status_code == 200:
+            data = r.json() or {}
+            itens = data.get("items") or data.get("data") or []
+            for it in itens:
+                produtos.append({
+                    "origem": nome,
+                    "produto": it.get("name") or it.get("title"),
+                    "valor": float(it.get("price", 0) or 0),
+                    "comissao": float(it.get("commission", 0) or it.get("commission_rate", 0)),
+                    "status": "catalogo",
+                    "timestamp": agora_iso()
+                })
+        log_info(f"Varredura {nome}: {len(produtos)} produtos")
+    except Exception as e:
+        log_error(f"Erro varrendo {nome}: {e}")
+    return produtos
+
+async def loop_varredura_marketplaces():
+    while ESTADO_ROBO["ciclo_ativo"]:
+        for nome, cfg in MARKETPLACES.items():
+            produtos = varrer_marketplace(nome, cfg)
+            for p in produtos:
+                pipeline_operacional(p)
+        await asyncio.sleep(SCAN_INTERVAL_SECONDS)
+
+@app.on_event("startup")
+async def iniciar_varredura_marketplaces():
+    asyncio.create_task(loop_varredura_marketplaces())
+    log_info("Varredura real de marketplaces ATIVA.")
+
+
+# =========================================================
+# MÓDULO 2 — GERAÇÃO AUTOMÁTICA DE CONTEÚDO
+# =========================================================
+
+TIPOS_CONTEUDO = ["headline", "copy_curta", "cta"]
+
+def gerar_headline(produto: str) -> str:
+    return f"Descubra agora por que {produto} está mudando o jogo."
+
+def gerar_copy_curta(produto: str, score: float) -> str:
+    return (
+        f"{produto} foi analisado pelo Robo Global AI e atingiu score {score}. "
+        f"Alta atratividade detectada. Veja por que tanta gente está entrando."
+    )
+
+def gerar_cta() -> str:
+    return "Acesse agora e confira os detalhes."
+
+def gerar_conteudo(decisao: DecisaoRobo, produto: str) -> Dict[str, Any]:
+    conteudo = {
+        "produto": produto,
+        "headline": gerar_headline(produto),
+        "copy": gerar_copy_curta(produto, decisao.score),
+        "cta": gerar_cta(),
+        "score": decisao.score,
+        "status": "READY",
+        "gerado_em": agora_iso()
+    }
+    log_info(f"Conteúdo gerado para {produto}")
+    return conteudo
+
+def registrar_conteudo(conteudo: Dict[str, Any]):
+    if not supabase:
+        return
+    try:
+        supabase.table("conteudos").insert(conteudo).execute()
+        log_info("Conteúdo registrado no Supabase.")
+    except Exception as e:
+        log_error(f"Erro ao registrar conteúdo: {e}")
+
+def pipeline_conteudo(evento_normalizado: Dict[str, Any], decisao: DecisaoRobo):
+    produto = evento_normalizado.get("produto") or "Produto"
+    conteudo = gerar_conteudo(decisao, produto)
+    registrar_conteudo(conteudo)
+
+# Hook no pipeline principal
+_original_pipeline = pipeline_operacional
+
+def pipeline_operacional(evento_normalizado: Dict[str, Any]):
+    decisao = analisar_produto(evento_normalizado)
+    registrar_decisao(decisao)
+    registrar_operacao(
+        descricao=f"Pipeline executado | {decisao.acao}",
+        dados={
+            "produto": evento_normalizado.get("produto"),
+            "score": decisao.score
+        }
+    )
+    if decisao.acao in ("ESCALAR", "TESTAR"):
+        pipeline_conteudo(evento_normalizado, decisao)
+    return decisao
+
+
+# =========================================================
+# MÓDULO 3 — ESCALA ORGÂNICA (SOCIAL)
+# =========================================================
+
+REDES_SOCIAIS = ["instagram", "tiktok", "youtube", "facebook"]
+
+def priorizar_conteudos():
+    if not supabase:
+        return []
+    try:
+        resp = (
+            supabase
+            .table("conteudos")
+            .select("*")
+            .eq("status", "READY")
+            .order("score", desc=True)
+            .limit(10)
+            .execute()
+        )
+        return resp.data or []
+    except Exception as e:
+        log_error(f"Erro ao priorizar conteúdos: {e}")
+        return []
+
+def planejar_publicacao(conteudo: Dict[str, Any]) -> Dict[str, Any]:
+    plano = {
+        "produto": conteudo.get("produto"),
+        "headline": conteudo.get("headline"),
+        "copy": conteudo.get("copy"),
+        "cta": conteudo.get("cta"),
+        "redes": REDES_SOCIAIS,
+        "status": "SCHEDULED",
+        "agendado_em": agora_iso()
+    }
+    log_info(f"Conteúdo planejado para escala orgânica: {conteudo.get('produto')}")
+    return plano
+
+def registrar_plano_publicacao(plano: Dict[str, Any]):
+    if not supabase:
+        return
+    try:
+        supabase.table("publicacoes").insert(plano).execute()
+        supabase.table("conteudos").update(
+            {"status": "SCHEDULED"}
+        ).eq("produto", plano.get("produto")).execute()
+        log_info("Plano de publicação registrado.")
+    except Exception as e:
+        log_error(f"Erro ao registrar plano de publicação: {e}")
+
+async def loop_escala_organica():
+    while ESTADO_ROBO["ciclo_ativo"]:
+        conteudos = priorizar_conteudos()
+        for c in conteudos:
+            plano = planejar_publicacao(c)
+            registrar_plano_publicacao(plano)
+        await asyncio.sleep(600)  # a cada 10 min
+
+@app.on_event("startup")
+async def iniciar_escala_organica():
+    asyncio.create_task(loop_escala_organica())
+    log_info("Escala orgânica ATIVA (modo planejamento).")
+
+
+# =========================================================
+# MÓDULO 4 — ESCALA PAGA CONTROLADA
+# =========================================================
+
+CAPITAL_CONFIG = {
+    "capital_total": float(os.getenv("CAPITAL_TOTAL", "1000")),
+    "risco_max_por_acao": float(os.getenv("RISCO_MAX_POR_ACAO", "0.02")),  # 2%
+    "cpa_max": float(os.getenv("CPA_MAX", "50")),
+}
+
+def simular_roi(conteudo: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Simulação conservadora de ROI antes de qualquer gasto real
+    """
+    score = conteudo.get("score", 0)
+    investimento = CAPITAL_CONFIG["capital_total"] * CAPITAL_CONFIG["risco_max_por_acao"]
+    retorno_estimado = investimento * (score / 50)  # heurística interna
+
+    roi = (retorno_estimado - investimento) / investimento if investimento > 0 else 0
+
+    simulacao = {
+        "produto": conteudo.get("produto"),
+        "investimento_sugerido": round(investimento, 2),
+        "retorno_estimado": round(retorno_estimado, 2),
+        "roi_estimado": round(roi, 2),
+        "cpa_max": CAPITAL_CONFIG["cpa_max"],
+        "status": "SIMULADO",
+        "simulado_em": agora_iso()
+    }
+    log_info(f"ROI simulado para {conteudo.get('produto')} | ROI {simulacao['roi_estimado']}")
+    return simulacao
+
+def registrar_simulacao(simulacao: Dict[str, Any]):
+    if not supabase:
+        return
+    try:
+        supabase.table("escala_paga").insert(simulacao).execute()
+        log_info("Simulação de escala paga registrada.")
+    except Exception as e:
+        log_error(f"Erro ao registrar simulação paga: {e}")
+
+async def loop_escala_paga_controlada():
+    """
+    NÃO gasta dinheiro.
+    Apenas prepara e registra cenários matematicamente viáveis.
+    """
+    while ESTADO_ROBO["ciclo_ativo"]:
+        if not supabase:
+            await asyncio.sleep(300)
+            continue
+
+        try:
+            resp = (
+                supabase
+                .table("conteudos")
+                .select("*")
+                .eq("status", "SCHEDULED")
+                .order("score", desc=True)
+                .limit(5)
+                .execute()
+            )
+            for c in resp.data or []:
+                simulacao = simular_roi(c)
+                if simulacao["roi_estimado"] > 0:
+                    registrar_simulacao(simulacao)
+        except Exception as e:
+            log_error(f"Erro no loop de escala paga: {e}")
+
+        await asyncio.sleep(900)  # a cada 15 min
+
+@app.on_event("startup")
+async def iniciar_escala_paga():
+    asyncio.create_task(loop_escala_paga_controlada())
+    log_info("Escala paga CONTROLADA ATIVA (somente simulação).")
+
+# =========================================================
+# SISTEMA 100% ATIVO
+# =========================================================
+
+log_info("🔥 Robo Global AI OPERANDO EM CAPACIDADE MÁXIMA 🔥")
