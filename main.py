@@ -2142,3 +2142,43 @@ async def confirmar_acao(confirmacao_id: str):
 # ============================================================
 # FIM DA AÇÃO 18 — BACKEND
 # ============================================================
+
+
+# ============================================================
+# AÇÃO 19 — HISTÓRICO AUDITÁVEL DO ROBÔ
+# Inclusão obrigatória NO FINAL do main.py
+# ============================================================
+
+historico_eventos = []
+
+def registrar_evento(
+    origem: str,
+    tipo: str,
+    descricao: str,
+    dados: dict = None
+):
+    evento = {
+        "id": str(uuid4()),
+        "origem": origem,
+        "tipo": tipo,
+        "descricao": descricao,
+        "dados": dados or {},
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    historico_eventos.append(evento)
+    logger.info(
+        f"[HISTORICO] [EVENTO] origem={origem} tipo={tipo}"
+    )
+
+
+@app.get("/historico")
+async def listar_historico():
+    return {
+        "status": "OK",
+        "total": len(historico_eventos),
+        "eventos": historico_eventos[-100:][::-1]  # últimos 100
+    }
+
+# ============================================================
+# FIM DA AÇÃO 19 — BACKEND
+# ============================================================
