@@ -347,7 +347,9 @@ async def webhook_universal(request: Request):
     registrar_evento_universal(evento)
 
     evento_norm = normalizar_evento("universal", payload)
-    pipeline_operacional(evento_norm)
+   resultado = pipeline_operacional(evento_norm)
+registrar_operacao(resultado)
+
 
     return {"status": "OK"}
 
