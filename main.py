@@ -2384,3 +2384,48 @@ async def snapshot_operacional():
 # ============================================================
 # FIM DA AÇÃO 24
 # ============================================================
+
+
+# ============================================================
+# AÇÃO 25 — EXPORTAÇÃO AUDITÁVEL
+# Inclusão obrigatória NO FINAL do main.py
+# ============================================================
+
+import csv
+from fastapi.responses import StreamingResponse, JSONResponse
+
+@app.get("/export/json")
+async def exportar_json():
+    return JSONResponse({
+        "timestamp": datetime.utcnow().isoformat(),
+        "health": health_status,
+        "metricas": metricas,
+        "historico": historico_eventos,
+        "confirmacoes": fila_confirmacoes
+    })
+
+
+@app.get("/export/csv")
+async def exportar_csv():
+    def gerar():
+        header = ["id", "origem", "tipo", "descricao", "timestamp"]
+        yield ",".join(header) + "\n"
+        for e in historico_eventos:
+            row = [
+                e.get("id",""),
+                e.get("origem",""),
+                e.get("tipo",""),
+                e.get("descricao",""),
+                e.get("timestamp","")
+            ]
+            yield ",".join(row) + "\n"
+
+    return StreamingResponse(
+        gerar(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=historico_robo.csv"}
+    )
+
+# ============================================================
+# FIM DA AÇÃO 25
+# ============================================================
