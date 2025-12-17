@@ -7,7 +7,7 @@ app = FastAPI()
 
 def sb():
     url = os.getenv("SUPABASE_URL")
-    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    key = os.getenv("SUPABASE_KEY")  # ← AJUSTE REAL
 
     if not url or not key:
         raise Exception("SUPABASE NÃO CONFIGURADO NO AMBIENTE")
