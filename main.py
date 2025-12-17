@@ -81,3 +81,9 @@ def ciclo(payload: dict = {}):
             "ok": False,
             "erro": str(e)
         }
+
+@app.get("/estado")
+def estado():
+    sbc = sb()
+    res = sbc.table("estado_atual").select("*").eq("id", 1).execute()
+    return res.data[0] if res.data else {}
