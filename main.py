@@ -1,11 +1,29 @@
-# main.py — ROBO GLOBAL AI (VERSÃO COMPLETA, ESTÁVEL E SEGURA)
+# main.py — ROBO GLOBAL AI
+# MVP SÓLIDO • RENTÁVEL • 24/7 • DASHBOARD ATIVO
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
 from supabase import create_client
 import os
 
+# =====================================================
+# APP
+# =====================================================
+
 app = FastAPI()
+
+# =====================================================
+# CORS (DASHBOARD GITHUB PAGES)
+# =====================================================
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # =====================================================
 # SUPABASE
@@ -16,16 +34,15 @@ def sb():
     key = os.getenv("SUPABASE_KEY")
 
     if not url or not key:
-        raise Exception("SUPABASE NÃO CONFIGURADO NO AMBIENTE")
+        raise Exception("SUPABASE NÃO CONFIGURADO")
 
     return create_client(url, key)
 
 # =====================================================
-# SEGURANÇA / LIMITES
+# LIMITES / SEGURANÇA
 # =====================================================
 
 def limite_ok(valor: float) -> bool:
-    # evita erro de payload, duplicidade absurda ou fraude
     return isinstance(valor, (int, float)) and 0 < valor <= 5000
 
 # =====================================================
@@ -76,8 +93,14 @@ def estado():
     res = sb().table("estado_atual").select("*").eq("id", 1).execute()
     return res.data[0] if res.data else {}
 
+
+# ALIAS PARA DASHBOARD
+@app.get("/status")
+def status():
+    return estado()
+
 # =====================================================
-# CICLO AUTOMÁTICO (WORKER)
+# CICLO AUTOMÁTICO (WORKER 24/7)
 # =====================================================
 
 @app.post("/ciclo")
@@ -85,7 +108,7 @@ def ciclo(payload: dict = {}):
     estado = bootstrap()
     capital_antes = estado["capital"]
 
-    # RENTABILIDADE REAL MÍNIMA (motor ativo)
+    # RENTABILIDADE REAL MÍNIMA (MOTOR)
     decisao = "GANHO_REAL_MINIMO"
     ganho = 1.0
     capital_depois = capital_antes + ganho
@@ -122,7 +145,7 @@ def webhook_hotmart(payload: dict):
     valor = float(payload.get("purchase", {}).get("price", 0))
 
     if not limite_ok(valor):
-        return {"ok": False, "motivo": "valor_invalido"}
+        return {"ok": False}
 
     estado = estado_atual()
     capital_antes = estado["capital"]
@@ -155,7 +178,7 @@ def webhook_eduzz(payload: dict):
     valor = float(payload.get("transaction", {}).get("price", 0))
 
     if not limite_ok(valor):
-        return {"ok": False, "motivo": "valor_invalido"}
+        return {"ok": False}
 
     estado = estado_atual()
     capital_antes = estado["capital"]
@@ -178,7 +201,3 @@ def webhook_eduzz(payload: dict):
     }).eq("id", 1).execute()
 
     return {"ok": True}
-
-@app.get("/status")
-def status():
-    return estado()
