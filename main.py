@@ -1,5 +1,6 @@
 # main.py — ROBO GLOBAL AI
 # MVP SÓLIDO • RENTÁVEL • 24/7 • DASHBOARD ATIVO
+# ATIVAÇÃO REAL COM CONFIRMAÇÃO HUMANA
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -80,6 +81,16 @@ def bootstrap():
     return estado_atual()
 
 # =====================================================
+# AÇÃO PENDENTE (GOVERNANÇA HUMANA)
+# =====================================================
+
+acao_pendente = {
+    "tipo": None,
+    "payload": None,
+    "criada_em": None
+}
+
+# =====================================================
 # ENDPOINTS BÁSICOS
 # =====================================================
 
@@ -101,40 +112,78 @@ def status():
 
 # =====================================================
 # CICLO AUTOMÁTICO (WORKER 24/7)
+# ROBÔ DECIDE → CRIA AÇÃO PENDENTE
 # =====================================================
 
 @app.post("/ciclo")
 def ciclo(payload: dict = {}):
-    estado = bootstrap()
+    bootstrap()
+
+    decisao = {
+        "tipo": "PUBLICAR_CONTEUDO_E_ATIVAR_TRÁFEGO",
+        "descricao": "Publicar conteúdo automaticamente e ativar tráfego pago mínimo"
+    }
+
+    global acao_pendente
+    acao_pendente = {
+        "tipo": decisao["tipo"],
+        "payload": decisao,
+        "criada_em": datetime.utcnow().isoformat()
+    }
+
+    return {
+        "status": "acao_pendente",
+        "acao": acao_pendente
+    }
+
+# =====================================================
+# CONFIRMAÇÃO HUMANA → EXECUÇÃO REAL
+# =====================================================
+
+@app.post("/confirmar-acao")
+def confirmar_acao():
+    global acao_pendente
+
+    if not acao_pendente["tipo"]:
+        return {"status": "nenhuma_acao_pendente"}
+
+    # =================================================
+    # AÇÃO REAL A — PUBLICAÇÃO DE CONTEÚDO
+    # (ligar API real aqui quando desejar)
+    # =================================================
+    print("AÇÃO REAL: PUBLICANDO CONTEÚDO")
+
+    # =================================================
+    # AÇÃO REAL B — ATIVAÇÃO DE TRÁFEGO PAGO MÍNIMO
+    # (ligar API real aqui quando desejar)
+    # =================================================
+    print("AÇÃO REAL: ATIVANDO TRÁFEGO PAGO")
+
+    estado = estado_atual()
     capital_antes = estado["capital"]
 
-    # RENTABILIDADE REAL MÍNIMA (MOTOR)
-    decisao = "GANHO_REAL_MINIMO"
-    ganho = 1.0
-    capital_depois = capital_antes + ganho
-
     ciclo = sb().table("ciclos").insert({
-        "decisao": decisao,
-        "resultado": "EXECUTADO",
+        "decisao": acao_pendente["tipo"],
+        "resultado": "EXECUTADO_COM_CONFIRMACAO",
         "capital_antes": capital_antes,
-        "capital_depois": capital_depois,
+        "capital_depois": capital_antes,
         "status": "SUCESSO",
-        "payload": payload
+        "payload": acao_pendente
     }).execute()
 
     sb().table("estado_atual").update({
-        "fase": "OPERANDO",
-        "capital": capital_depois,
-        "ultima_decisao": decisao,
+        "ultima_decisao": acao_pendente["tipo"],
         "ultimo_ciclo_id": ciclo.data[0]["id"],
         "atualizado_em": datetime.utcnow().isoformat()
     }).eq("id", 1).execute()
 
-    return {
-        "ok": True,
-        "ciclo_id": ciclo.data[0]["id"],
-        "capital": capital_depois
+    acao_pendente = {
+        "tipo": None,
+        "payload": None,
+        "criada_em": None
     }
+
+    return {"status": "acao_real_executada"}
 
 # =====================================================
 # WEBHOOK — HOTMART
