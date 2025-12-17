@@ -1,71 +1,58 @@
-# main.py — Robo Global AI (estado persistente real)
-
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from datetime import datetime
 from supabase import create_client
 import os
 
 app = FastAPI()
 
-# Supabase (SERVICE ROLE)
-supabase = create_client(
-    os.environ["SUPABASE_URL"],
-    os.environ["SUPABASE_SERVICE_ROLE_KEY"]
-)
+def sb():
+    return create_client(
+        os.getenv("SUPABASE_URL"),
+        os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    )
 
-# ---------- UTIL ----------
-
-def get_estado():
-    res = supabase.table("estado_atual").select("*").eq("id", 1).execute()
-    return res.data[0] if res.data else None
-
+def estado_atual():
+    r = sb().table("estado_atual").select("*").eq("id", 1).execute()
+    return r.data[0] if r.data else None
 
 def bootstrap():
-    estado = get_estado()
+    estado = estado_atual()
     if estado:
         return estado
 
-    ciclo = supabase.table("ciclos").insert({
+    ciclo = sb().table("ciclos").insert({
         "decisao": "BOOTSTRAP",
-        "resultado": "INICIALIZACAO",
-        "capital_antes": 0.0,
-        "capital_depois": 0.0,
+        "resultado": "INIT",
+        "capital_antes": 0,
+        "capital_depois": 0,
         "status": "SUCESSO",
         "payload": {}
     }).execute()
 
-    ciclo_id = ciclo.data[0]["id"]
-
-    supabase.table("estado_atual").insert({
+    sb().table("estado_atual").insert({
         "id": 1,
-        "fase": "INICIAL",
-        "capital": 0.0,
+        "fase": "OPERANDO",
+        "capital": 0,
         "ultima_decisao": "BOOTSTRAP",
-        "ultimo_ciclo_id": ciclo_id,
+        "ultimo_ciclo_id": ciclo.data[0]["id"],
         "atualizado_em": datetime.utcnow().isoformat()
     }).execute()
 
-    return get_estado()
-
-
-# ---------- ENDPOINTS ----------
+    return estado_atual()
 
 @app.post("/ping")
 def ping():
-    return {"ok": True, "ts": datetime.utcnow().isoformat()}
-
+    return {"ok": True}
 
 @app.post("/ciclo")
 def ciclo(payload: dict = {}):
     estado = bootstrap()
-
     capital_antes = estado["capital"]
 
-    # LÓGICA ATUAL DO ROBÔ (MVP REAL)
     decisao = "OBSERVAR"
     capital_depois = capital_antes
 
-    ciclo = supabase.table("ciclos").insert({
+    ciclo = sb().table("ciclos").insert({
         "decisao": decisao,
         "resultado": "EXECUTADO",
         "capital_antes": capital_antes,
@@ -74,19 +61,15 @@ def ciclo(payload: dict = {}):
         "payload": payload
     }).execute()
 
-    ciclo_id = ciclo.data[0]["id"]
-
-    supabase.table("estado_atual").update({
-        "fase": "OPERANDO",
+    sb().table("estado_atual").update({
         "capital": capital_depois,
         "ultima_decisao": decisao,
-        "ultimo_ciclo_id": ciclo_id,
+        "ultimo_ciclo_id": ciclo.data[0]["id"],
         "atualizado_em": datetime.utcnow().isoformat()
     }).eq("id", 1).execute()
 
-    return {"status": "ok", "ciclo_id": ciclo_id}
-
+    return {"ok": True}
 
 @app.get("/estado")
 def estado():
-    return get_estado()
+    return estado_atual()
