@@ -178,3 +178,7 @@ def webhook_eduzz(payload: dict):
     }).eq("id", 1).execute()
 
     return {"ok": True}
+
+@app.get("/status")
+def status():
+    return estado()
