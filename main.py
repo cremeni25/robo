@@ -1,22 +1,19 @@
 # main.py — ROBO GLOBAL AI
-# MVP SÓLIDO • RENTÁVEL • 24/7 • DASHBOARD ATIVO
-# ATIVAÇÃO REAL COM CONFIRMAÇÃO HUMANA
+# OPERAÇÃO REAL • 24/7 • DECISÃO → CONFIRMAÇÃO → AÇÃO
+# SEM SIMULAÇÃO • SEM LOGS • SEM ESPELHO
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
 from supabase import create_client
 import os
+import requests
 
 # =====================================================
 # APP
 # =====================================================
 
 app = FastAPI()
-
-# =====================================================
-# CORS (DASHBOARD GITHUB PAGES)
-# =====================================================
 
 app.add_middleware(
     CORSMiddleware,
@@ -33,17 +30,15 @@ app.add_middleware(
 def sb():
     url = os.getenv("SUPABASE_URL")
     key = os.getenv("SUPABASE_KEY")
-
     if not url or not key:
         raise Exception("SUPABASE NÃO CONFIGURADO")
-
     return create_client(url, key)
 
 # =====================================================
-# LIMITES / SEGURANÇA
+# LIMITES
 # =====================================================
 
-def limite_ok(valor: float) -> bool:
+def limite_ok(valor):
     return isinstance(valor, (int, float)) and 0 < valor <= 5000
 
 # =====================================================
@@ -62,9 +57,9 @@ def bootstrap():
 
     ciclo = sb().table("ciclos").insert({
         "decisao": "BOOTSTRAP",
-        "resultado": "INICIALIZACAO",
-        "capital_antes": 0.0,
-        "capital_depois": 0.0,
+        "resultado": "INICIALIZADO",
+        "capital_antes": 0,
+        "capital_depois": 0,
         "status": "SUCESSO",
         "payload": {}
     }).execute()
@@ -72,7 +67,7 @@ def bootstrap():
     sb().table("estado_atual").insert({
         "id": 1,
         "fase": "OPERANDO",
-        "capital": 0.0,
+        "capital": 0,
         "ultima_decisao": "BOOTSTRAP",
         "ultimo_ciclo_id": ciclo.data[0]["id"],
         "atualizado_em": datetime.utcnow().isoformat()
@@ -81,12 +76,11 @@ def bootstrap():
     return estado_atual()
 
 # =====================================================
-# AÇÃO PENDENTE (GOVERNANÇA HUMANA)
+# AÇÃO PENDENTE (ÚNICA)
 # =====================================================
 
 acao_pendente = {
     "tipo": None,
-    "payload": None,
     "criada_em": None
 }
 
@@ -94,40 +88,31 @@ acao_pendente = {
 # ENDPOINTS BÁSICOS
 # =====================================================
 
-@app.post("/ping")
+@app.get("/ping")
 def ping():
     return {"ok": True}
 
 
 @app.get("/estado")
 def estado():
-    res = sb().table("estado_atual").select("*").eq("id", 1).execute()
-    return res.data[0] if res.data else {}
+    return estado_atual() or {}
 
 
-# ALIAS PARA DASHBOARD
 @app.get("/status")
 def status():
     return estado()
 
 # =====================================================
-# CICLO AUTOMÁTICO (WORKER 24/7)
-# ROBÔ DECIDE → CRIA AÇÃO PENDENTE
+# CICLO AUTÔNOMO — DECIDE
 # =====================================================
 
 @app.post("/ciclo")
-def ciclo(payload: dict = {}):
+def ciclo():
     bootstrap()
-
-    decisao = {
-        "tipo": "PUBLICAR_CONTEUDO_E_ATIVAR_TRÁFEGO",
-        "descricao": "Publicar conteúdo automaticamente e ativar tráfego pago mínimo"
-    }
 
     global acao_pendente
     acao_pendente = {
-        "tipo": decisao["tipo"],
-        "payload": decisao,
+        "tipo": "PUBLICAR_E_ATIVAR_TRAFEGO",
         "criada_em": datetime.utcnow().isoformat()
     }
 
@@ -137,7 +122,7 @@ def ciclo(payload: dict = {}):
     }
 
 # =====================================================
-# CONFIRMAÇÃO HUMANA → EXECUÇÃO REAL
+# CONFIRMAÇÃO HUMANA — EXECUTA
 # =====================================================
 
 @app.post("/confirmar-acao")
@@ -145,26 +130,33 @@ def confirmar_acao():
     global acao_pendente
 
     if not acao_pendente["tipo"]:
-        return {"status": "nenhuma_acao_pendente"}
+        return {"status": "nenhuma_acao"}
 
-    # =================================================
-    # AÇÃO REAL A — PUBLICAÇÃO DE CONTEÚDO
-    # (ligar API real aqui quando desejar)
-    # =================================================
-    print("AÇÃO REAL: PUBLICANDO CONTEÚDO")
+    # ===== AÇÃO REAL A — PUBLICAÇÃO =====
+    webhook_publicacao = os.getenv("WEBHOOK_PUBLICACAO_URL")
+    if webhook_publicacao:
+        requests.post(webhook_publicacao, json={
+            "acao": "PUBLICAR_CONTEUDO",
+            "origem": "ROBO_GLOBAL_AI",
+            "timestamp": datetime.utcnow().isoformat()
+        }, timeout=10)
 
-    # =================================================
-    # AÇÃO REAL B — ATIVAÇÃO DE TRÁFEGO PAGO MÍNIMO
-    # (ligar API real aqui quando desejar)
-    # =================================================
-    print("AÇÃO REAL: ATIVANDO TRÁFEGO PAGO")
+    # ===== AÇÃO REAL B — TRÁFEGO =====
+    webhook_trafego = os.getenv("WEBHOOK_TRAFEGO_URL")
+    if webhook_trafego:
+        requests.post(webhook_trafego, json={
+            "acao": "ATIVAR_TRAFEGO",
+            "orcamento_diario": 10,
+            "origem": "ROBO_GLOBAL_AI",
+            "timestamp": datetime.utcnow().isoformat()
+        }, timeout=10)
 
     estado = estado_atual()
     capital_antes = estado["capital"]
 
     ciclo = sb().table("ciclos").insert({
         "decisao": acao_pendente["tipo"],
-        "resultado": "EXECUTADO_COM_CONFIRMACAO",
+        "resultado": "EXECUTADO",
         "capital_antes": capital_antes,
         "capital_depois": capital_antes,
         "status": "SUCESSO",
@@ -177,40 +169,35 @@ def confirmar_acao():
         "atualizado_em": datetime.utcnow().isoformat()
     }).eq("id", 1).execute()
 
-    acao_pendente = {
-        "tipo": None,
-        "payload": None,
-        "criada_em": None
-    }
+    acao_pendente = {"tipo": None, "criada_em": None}
 
     return {"status": "acao_real_executada"}
 
 # =====================================================
-# WEBHOOK — HOTMART
+# WEBHOOK HOTMART
 # =====================================================
 
 @app.post("/webhook/hotmart")
 def webhook_hotmart(payload: dict):
     valor = float(payload.get("purchase", {}).get("price", 0))
-
     if not limite_ok(valor):
         return {"ok": False}
 
     estado = estado_atual()
-    capital_antes = estado["capital"]
-    capital_depois = capital_antes + valor
+    antes = estado["capital"]
+    depois = antes + valor
 
     ciclo = sb().table("ciclos").insert({
         "decisao": "VENDA_HOTMART",
-        "resultado": "VENDA_CONFIRMADA",
-        "capital_antes": capital_antes,
-        "capital_depois": capital_depois,
+        "resultado": "CONFIRMADA",
+        "capital_antes": antes,
+        "capital_depois": depois,
         "status": "SUCESSO",
         "payload": payload
     }).execute()
 
     sb().table("estado_atual").update({
-        "capital": capital_depois,
+        "capital": depois,
         "ultima_decisao": "VENDA_HOTMART",
         "ultimo_ciclo_id": ciclo.data[0]["id"],
         "atualizado_em": datetime.utcnow().isoformat()
@@ -219,31 +206,30 @@ def webhook_hotmart(payload: dict):
     return {"ok": True}
 
 # =====================================================
-# WEBHOOK — EDUZZ
+# WEBHOOK EDUZZ
 # =====================================================
 
 @app.post("/webhook/eduzz")
 def webhook_eduzz(payload: dict):
     valor = float(payload.get("transaction", {}).get("price", 0))
-
     if not limite_ok(valor):
         return {"ok": False}
 
     estado = estado_atual()
-    capital_antes = estado["capital"]
-    capital_depois = capital_antes + valor
+    antes = estado["capital"]
+    depois = antes + valor
 
     ciclo = sb().table("ciclos").insert({
         "decisao": "VENDA_EDUZZ",
-        "resultado": "VENDA_CONFIRMADA",
-        "capital_antes": capital_antes,
-        "capital_depois": capital_depois,
+        "resultado": "CONFIRMADA",
+        "capital_antes": antes,
+        "capital_depois": depois,
         "status": "SUCESSO",
         "payload": payload
     }).execute()
 
     sb().table("estado_atual").update({
-        "capital": capital_depois,
+        "capital": depois,
         "ultima_decisao": "VENDA_EDUZZ",
         "ultimo_ciclo_id": ciclo.data[0]["id"],
         "atualizado_em": datetime.utcnow().isoformat()
