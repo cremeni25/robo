@@ -1221,3 +1221,42 @@ async def iniciar_autoajuste():
 
 log_info("🚀 Robo Global AI 100% AUTÔNOMO • PROATIVO • COM GOVERNANÇA 🚀")
 
+
+from datetime import datetime
+import uuid
+
+def registrar_operacao_economica(
+    supabase,
+    tipo: str,
+    valor: float,
+    moeda: str = "USD",
+    texto_original: str = "AÇÃO ECONÔMICA REAL MÍNIMA",
+    status: str = "executada"
+):
+    payload = {
+        "tipo": tipo,
+        "valor": float(valor),
+        "texto_da_moeda": moeda,
+        "texto_original": texto_original,
+        "texto_de_status": status,
+        "criado_em": datetime.utcnow().isoformat()
+    }
+
+    result = supabase.table("operacoes_economicas").insert(payload).execute()
+
+    return {
+        "operacao_registrada": True,
+        "id": result.data[0] if result.data else None,
+        "valor": valor,
+        "moeda": moeda
+    }
+
+
+registrar_operacao_economica(
+    supabase=supabase,
+    tipo="bootstrap_real",
+    valor=0.01,
+    moeda="USD",
+    texto_original="BOOTSTRAP ECONÔMICO AUTÔNOMO",
+    status="confirmado"
+)
