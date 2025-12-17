@@ -1,39 +1,92 @@
-from fastapi import FastAPI
+# main.py — Robo Global AI (estado persistente real)
+
+from fastapi import FastAPI, Request
 from datetime import datetime
+from supabase import create_client
+import os
 
 app = FastAPI()
 
+# Supabase (SERVICE ROLE)
+supabase = create_client(
+    os.environ["SUPABASE_URL"],
+    os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+)
+
+# ---------- UTIL ----------
+
+def get_estado():
+    res = supabase.table("estado_atual").select("*").eq("id", 1).execute()
+    return res.data[0] if res.data else None
+
+
+def bootstrap():
+    estado = get_estado()
+    if estado:
+        return estado
+
+    ciclo = supabase.table("ciclos").insert({
+        "decisao": "BOOTSTRAP",
+        "resultado": "INICIALIZACAO",
+        "capital_antes": 0.0,
+        "capital_depois": 0.0,
+        "status": "SUCESSO",
+        "payload": {}
+    }).execute()
+
+    ciclo_id = ciclo.data[0]["id"]
+
+    supabase.table("estado_atual").insert({
+        "id": 1,
+        "fase": "INICIAL",
+        "capital": 0.0,
+        "ultima_decisao": "BOOTSTRAP",
+        "ultimo_ciclo_id": ciclo_id,
+        "atualizado_em": datetime.utcnow().isoformat()
+    }).execute()
+
+    return get_estado()
+
+
+# ---------- ENDPOINTS ----------
+
 @app.post("/ping")
 def ping():
-    print("PING_REAL", datetime.utcnow().isoformat())
-    return {"ok": True}
+    return {"ok": True, "ts": datetime.utcnow().isoformat()}
 
-from datetime import datetime
 
 @app.post("/ciclo")
-def ciclo():
-    print("CICLO_EXECUTADO", datetime.utcnow().isoformat())
-    return {"status": "ciclo_ok"}
+def ciclo(payload: dict = {}):
+    estado = bootstrap()
 
-# --- ESTADO ECONÔMICO (MVP) ---
-from datetime import datetime
+    capital_antes = estado["capital"]
 
-ESTADO = {
-    "capital": 0.0,
-    "eventos": 0,
-    "ultima_decisao": None,
-}
+    # LÓGICA ATUAL DO ROBÔ (MVP REAL)
+    decisao = "OBSERVAR"
+    capital_depois = capital_antes
+
+    ciclo = supabase.table("ciclos").insert({
+        "decisao": decisao,
+        "resultado": "EXECUTADO",
+        "capital_antes": capital_antes,
+        "capital_depois": capital_depois,
+        "status": "SUCESSO",
+        "payload": payload
+    }).execute()
+
+    ciclo_id = ciclo.data[0]["id"]
+
+    supabase.table("estado_atual").update({
+        "fase": "OPERANDO",
+        "capital": capital_depois,
+        "ultima_decisao": decisao,
+        "ultimo_ciclo_id": ciclo_id,
+        "atualizado_em": datetime.utcnow().isoformat()
+    }).eq("id", 1).execute()
+
+    return {"status": "ok", "ciclo_id": ciclo_id}
+
 
 @app.get("/estado")
 def estado():
-    return ESTADO
-
-@app.post("/ciclo")
-def ciclo():
-    ESTADO["eventos"] += 1
-    ESTADO["ultima_decisao"] = {
-        "acao": "OBSERVAR",
-        "timestamp": datetime.utcnow().isoformat()
-    }
-    print("CICLO_EXECUTADO", ESTADO["eventos"], ESTADO["ultima_decisao"])
-    return {"status": "ciclo_ok", "eventos": ESTADO["eventos"]}
+    return get_estado()
