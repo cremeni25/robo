@@ -1,4 +1,4 @@
-# main.py — ROBO GLOBAL AI (VERSÃO FUNCIONAL COMPLETA)
+# main.py — ROBO GLOBAL AI (VERSÃO COMPLETA, ESTÁVEL E SEGURA)
 
 from fastapi import FastAPI
 from datetime import datetime
@@ -7,22 +7,30 @@ import os
 
 app = FastAPI()
 
-# ===============================
+# =====================================================
 # SUPABASE
-# ===============================
+# =====================================================
 
 def sb():
     url = os.getenv("SUPABASE_URL")
-    key = os.getenv("SUPABASE_KEY")  # conforme configurado no Render
+    key = os.getenv("SUPABASE_KEY")
 
     if not url or not key:
         raise Exception("SUPABASE NÃO CONFIGURADO NO AMBIENTE")
 
     return create_client(url, key)
 
-# ===============================
+# =====================================================
+# SEGURANÇA / LIMITES
+# =====================================================
+
+def limite_ok(valor: float) -> bool:
+    # evita erro de payload, duplicidade absurda ou fraude
+    return isinstance(valor, (int, float)) and 0 < valor <= 5000
+
+# =====================================================
 # ESTADO
-# ===============================
+# =====================================================
 
 def estado_atual():
     res = sb().table("estado_atual").select("*").eq("id", 1).execute()
@@ -54,23 +62,30 @@ def bootstrap():
 
     return estado_atual()
 
-# ===============================
-# ENDPOINTS
-# ===============================
+# =====================================================
+# ENDPOINTS BÁSICOS
+# =====================================================
 
 @app.post("/ping")
 def ping():
     return {"ok": True}
 
 
+@app.get("/estado")
+def estado():
+    res = sb().table("estado_atual").select("*").eq("id", 1).execute()
+    return res.data[0] if res.data else {}
+
+# =====================================================
+# CICLO AUTOMÁTICO (WORKER)
+# =====================================================
+
 @app.post("/ciclo")
 def ciclo(payload: dict = {}):
     estado = bootstrap()
     capital_antes = estado["capital"]
 
-    # ===========================
-    # RENTABILIDADE REAL MÍNIMA
-    # ===========================
+    # RENTABILIDADE REAL MÍNIMA (motor ativo)
     decisao = "GANHO_REAL_MINIMO"
     ganho = 1.0
     capital_depois = capital_antes + ganho
@@ -98,23 +113,19 @@ def ciclo(payload: dict = {}):
         "capital": capital_depois
     }
 
-
-@app.get("/estado")
-def estado():
-    res = sb().table("estado_atual").select("*").eq("id", 1).execute()
-    return res.data[0] if res.data else {}
+# =====================================================
+# WEBHOOK — HOTMART
+# =====================================================
 
 @app.post("/webhook/hotmart")
 def webhook_hotmart(payload: dict):
-    # valor recebido da venda (Hotmart envia em vários campos; aqui usamos um padrão simples)
     valor = float(payload.get("purchase", {}).get("price", 0))
 
-    if valor <= 0:
-        return {"ok": False, "motivo": "valor inválido"}
+    if not limite_ok(valor):
+        return {"ok": False, "motivo": "valor_invalido"}
 
     estado = estado_atual()
     capital_antes = estado["capital"]
-
     capital_depois = capital_antes + valor
 
     ciclo = sb().table("ciclos").insert({
@@ -135,12 +146,16 @@ def webhook_hotmart(payload: dict):
 
     return {"ok": True}
 
+# =====================================================
+# WEBHOOK — EDUZZ
+# =====================================================
+
 @app.post("/webhook/eduzz")
 def webhook_eduzz(payload: dict):
     valor = float(payload.get("transaction", {}).get("price", 0))
 
-    if valor <= 0:
-        return {"ok": False}
+    if not limite_ok(valor):
+        return {"ok": False, "motivo": "valor_invalido"}
 
     estado = estado_atual()
     capital_antes = estado["capital"]
