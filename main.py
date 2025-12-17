@@ -134,3 +134,32 @@ def webhook_hotmart(payload: dict):
     }).eq("id", 1).execute()
 
     return {"ok": True}
+
+@app.post("/webhook/eduzz")
+def webhook_eduzz(payload: dict):
+    valor = float(payload.get("transaction", {}).get("price", 0))
+
+    if valor <= 0:
+        return {"ok": False}
+
+    estado = estado_atual()
+    capital_antes = estado["capital"]
+    capital_depois = capital_antes + valor
+
+    ciclo = sb().table("ciclos").insert({
+        "decisao": "VENDA_EDUZZ",
+        "resultado": "VENDA_CONFIRMADA",
+        "capital_antes": capital_antes,
+        "capital_depois": capital_depois,
+        "status": "SUCESSO",
+        "payload": payload
+    }).execute()
+
+    sb().table("estado_atual").update({
+        "capital": capital_depois,
+        "ultima_decisao": "VENDA_EDUZZ",
+        "ultimo_ciclo_id": ciclo.data[0]["id"],
+        "atualizado_em": datetime.utcnow().isoformat()
+    }).eq("id", 1).execute()
+
+    return {"ok": True}
