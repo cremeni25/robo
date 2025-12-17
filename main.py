@@ -103,3 +103,34 @@ def ciclo(payload: dict = {}):
 def estado():
     res = sb().table("estado_atual").select("*").eq("id", 1).execute()
     return res.data[0] if res.data else {}
+
+@app.post("/webhook/hotmart")
+def webhook_hotmart(payload: dict):
+    # valor recebido da venda (Hotmart envia em vários campos; aqui usamos um padrão simples)
+    valor = float(payload.get("purchase", {}).get("price", 0))
+
+    if valor <= 0:
+        return {"ok": False, "motivo": "valor inválido"}
+
+    estado = estado_atual()
+    capital_antes = estado["capital"]
+
+    capital_depois = capital_antes + valor
+
+    ciclo = sb().table("ciclos").insert({
+        "decisao": "VENDA_HOTMART",
+        "resultado": "VENDA_CONFIRMADA",
+        "capital_antes": capital_antes,
+        "capital_depois": capital_depois,
+        "status": "SUCESSO",
+        "payload": payload
+    }).execute()
+
+    sb().table("estado_atual").update({
+        "capital": capital_depois,
+        "ultima_decisao": "VENDA_HOTMART",
+        "ultimo_ciclo_id": ciclo.data[0]["id"],
+        "atualizado_em": datetime.utcnow().isoformat()
+    }).eq("id", 1).execute()
+
+    return {"ok": True}
