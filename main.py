@@ -49,30 +49,35 @@ def ping():
 
 @app.post("/ciclo")
 def ciclo(payload: dict = {}):
-    estado = bootstrap()
-    capital_antes = estado["capital"]
+    try:
+        estado = bootstrap()
+        capital_antes = estado["capital"]
 
-    decisao = "OBSERVAR"
-    capital_depois = capital_antes
+        decisao = "OBSERVAR"
+        capital_depois = capital_antes
 
-    ciclo = sb().table("ciclos").insert({
-        "decisao": decisao,
-        "resultado": "EXECUTADO",
-        "capital_antes": capital_antes,
-        "capital_depois": capital_depois,
-        "status": "SUCESSO",
-        "payload": payload
-    }).execute()
+        ciclo = sb().table("ciclos").insert({
+            "decisao": decisao,
+            "resultado": "EXECUTADO",
+            "capital_antes": capital_antes,
+            "capital_depois": capital_depois,
+            "status": "SUCESSO",
+            "payload": payload
+        }).execute()
 
-    sb().table("estado_atual").update({
-        "capital": capital_depois,
-        "ultima_decisao": decisao,
-        "ultimo_ciclo_id": ciclo.data[0]["id"],
-        "atualizado_em": datetime.utcnow().isoformat()
-    }).eq("id", 1).execute()
+        ciclo_id = ciclo.data[0]["id"]
 
-    return {"ok": True}
+        sb().table("estado_atual").update({
+            "capital": capital_depois,
+            "ultima_decisao": decisao,
+            "ultimo_ciclo_id": ciclo_id,
+            "atualizado_em": datetime.utcnow().isoformat()
+        }).eq("id", 1).execute()
 
-@app.get("/estado")
-def estado():
-    return estado_atual()
+        return {"ok": True, "ciclo_id": ciclo_id}
+
+    except Exception as e:
+        return {
+            "ok": False,
+            "erro": str(e)
+        }
