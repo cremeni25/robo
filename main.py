@@ -6,10 +6,13 @@ import os
 app = FastAPI()
 
 def sb():
-    return create_client(
-        os.getenv("SUPABASE_URL"),
-        os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-    )
+    url = os.getenv("SUPABASE_URL")
+    key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+
+    if not url or not key:
+        raise Exception("SUPABASE NÃO CONFIGURADO NO AMBIENTE")
+
+    return create_client(url, key)
 
 def estado_atual():
     r = sb().table("estado_atual").select("*").eq("id", 1).execute()
