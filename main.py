@@ -1,5 +1,5 @@
-# main.py — ROBO GLOBAL AI — VERSÃO FINAL
-# OPERAÇÃO REAL • LOOP AUTÔNOMO • RENDER • SEM SIMULAÇÃO
+# main.py — ROBO GLOBAL AI — VERSÃO FINAL CORRETA PARA RENDER
+# OPERAÇÃO REAL • LOOP AUTÔNOMO • FASTAPI • BACKGROUND WORKER
 
 import os
 import asyncio
@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client
 
 # =====================================================
-# CONFIGURAÇÕES
+# CONFIGURAÇÕES GERAIS
 # =====================================================
 
 APP_NAME = "ROBO GLOBAL AI"
@@ -27,7 +27,7 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 sb = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # =====================================================
-# FASTAPI
+# FASTAPI APP
 # =====================================================
 
 app = FastAPI(title=APP_NAME)
@@ -41,7 +41,7 @@ app.add_middleware(
 )
 
 # =====================================================
-# ESTADO GLOBAL
+# ESTADO GLOBAL DO ROBÔ
 # =====================================================
 
 estado_global = {
@@ -52,7 +52,7 @@ estado_global = {
 }
 
 # =====================================================
-# LOG
+# LOG E REGISTRO
 # =====================================================
 
 def log(origem: str, nivel: str, mensagem: str):
@@ -61,11 +61,11 @@ def log(origem: str, nivel: str, mensagem: str):
         "origem": origem,
         "nivel": nivel,
         "mensagem": mensagem,
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.utcnow().isoformat(),
     }).execute()
 
 # =====================================================
-# NORMALIZAÇÃO
+# NORMALIZAÇÃO DE EVENTOS
 # =====================================================
 
 def normalizar_evento(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -79,7 +79,7 @@ def normalizar_evento(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 # =====================================================
-# REGISTROS
+# REGISTROS FINANCEIROS
 # =====================================================
 
 def registrar_evento(evento: Dict[str, Any]):
@@ -95,15 +95,15 @@ def atualizar_capital(valor: float):
     sb.table("capital").insert({
         "valor": valor,
         "total": estado_global["capital"],
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.utcnow().isoformat(),
     }).execute()
 
 # =====================================================
-# DECISÃO ECONÔMICA
+# MOTOR DE DECISÃO ECONÔMICA
 # =====================================================
 
 def calcular_rentabilidade(evento: Dict[str, Any]) -> float:
-    if evento["valor"] == 0:
+    if evento["valor"] <= 0:
         return 0.0
     return evento["comissao"] / evento["valor"]
 
@@ -127,7 +127,7 @@ def decidir_acao(evento: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 # =====================================================
-# LOOP AUTÔNOMO
+# LOOP AUTÔNOMO (BACKGROUND WORKER)
 # =====================================================
 
 async def loop_autonomo():
@@ -136,29 +136,42 @@ async def loop_autonomo():
 
     while True:
         try:
-            eventos = sb.table("eventos").select("*").order("timestamp", desc=True).limit(5).execute().data
+            eventos = (
+                sb.table("eventos")
+                .select("*")
+                .order("timestamp", desc=True)
+                .limit(5)
+                .execute()
+                .data
+            )
+
             for evento in eventos:
                 decisao = decidir_acao(evento)
                 registrar_decisao(decisao)
+
             estado_global["ultimo_ciclo"] = datetime.utcnow().isoformat()
+
         except Exception as e:
             log("LOOP", "ERRO", str(e))
             estado_global["status"] = "ERRO"
+
         await asyncio.sleep(10)
 
 # =====================================================
-# BACKGROUND WORKER
+# STARTUP EVENT (RENDER SAFE)
 # =====================================================
 
-def iniciar_background():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(loop_autonomo())
+@app.on_event("startup")
+async def startup_event():
+    def start_loop():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(loop_autonomo())
 
-threading.Thread(target=iniciar_background, daemon=True).start()
+    threading.Thread(target=start_loop, daemon=True).start()
 
 # =====================================================
-# WEBHOOK
+# WEBHOOK UNIVERSAL
 # =====================================================
 
 @app.post("/webhook/universal")
@@ -170,7 +183,7 @@ async def webhook_universal(request: Request):
     return {"status": "OK"}
 
 # =====================================================
-# ENDPOINTS
+# ENDPOINTS DE CONTROLE
 # =====================================================
 
 @app.get("/status")
@@ -188,8 +201,15 @@ async def capital():
 
 @app.get("/decisoes")
 async def decisoes():
-    return sb.table("decisoes").select("*").order("timestamp", desc=True).limit(20).execute().data
+    return (
+        sb.table("decisoes")
+        .select("*")
+        .order("timestamp", desc=True)
+        .limit(20)
+        .execute()
+        .data
+    )
 
 # =====================================================
-# FIM
+# FIM DO ARQUIVO
 # =====================================================
