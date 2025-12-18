@@ -1,19 +1,36 @@
 # main.py — ROBO GLOBAL AI
-# OPERAÇÃO REAL • 24/7 • DECISÃO → CONFIRMAÇÃO → AÇÃO
-# SEM SIMULAÇÃO • SEM LOGS • SEM ESPELHO
+# CÓDIGO-BASE COMPLETO • LOOP AUTÔNOMO • EXECUÇÃO EM RENDER
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from datetime import datetime
-from supabase import create_client
 import os
-import requests
+import asyncio
+import threading
+from datetime import datetime
+from typing import Dict, Any
+
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from supabase import create_client, Client
 
 # =====================================================
-# APP
+# CONFIGURAÇÕES BÁSICAS
 # =====================================================
 
-app = FastAPI()
+APP_NAME = "ROBO GLOBAL AI"
+ENV = os.getenv("ENV", "production")
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+
+if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+    raise RuntimeError("SUPABASE NÃO CONFIGURADO")
+
+sb: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+
+# =====================================================
+# FASTAPI
+# =====================================================
+
+app = FastAPI(title=APP_NAME)
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,215 +41,159 @@ app.add_middleware(
 )
 
 # =====================================================
-# SUPABASE
+# ESTADO GLOBAL DO ROBÔ
 # =====================================================
 
-def sb():
-    url = os.getenv("SUPABASE_URL")
-    key = os.getenv("SUPABASE_KEY")
-    if not url or not key:
-        raise Exception("SUPABASE NÃO CONFIGURADO")
-    return create_client(url, key)
-
-# =====================================================
-# LIMITES
-# =====================================================
-
-def limite_ok(valor):
-    return isinstance(valor, (int, float)) and 0 < valor <= 5000
-
-# =====================================================
-# ESTADO
-# =====================================================
-
-def estado_atual():
-    res = sb().table("estado_atual").select("*").eq("id", 1).execute()
-    return res.data[0] if res.data else None
-
-
-def bootstrap():
-    estado = estado_atual()
-    if estado:
-        return estado
-
-    ciclo = sb().table("ciclos").insert({
-        "decisao": "BOOTSTRAP",
-        "resultado": "INICIALIZADO",
-        "capital_antes": 0,
-        "capital_depois": 0,
-        "status": "SUCESSO",
-        "payload": {}
-    }).execute()
-
-    sb().table("estado_atual").insert({
-        "id": 1,
-        "fase": "OPERANDO",
-        "capital": 0,
-        "ultima_decisao": "BOOTSTRAP",
-        "ultimo_ciclo_id": ciclo.data[0]["id"],
-        "atualizado_em": datetime.utcnow().isoformat()
-    }).execute()
-
-    return estado_atual()
-
-# =====================================================
-# AÇÃO PENDENTE (ÚNICA)
-# =====================================================
-
-acao_pendente = {
-    "tipo": None,
-    "criada_em": None
+estado_global = {
+    "status": "INICIALIZANDO",
+    "capital": 0.0,
+    "modo": "CONSERVADOR",
+    "ultimo_ciclo": None,
 }
 
 # =====================================================
-# ENDPOINTS BÁSICOS
+# UTILIDADES
 # =====================================================
 
-@app.get("/ping")
-def ping():
-    return {"ok": True}
+def log(origem: str, nivel: str, mensagem: str):
+    texto = f"[{origem}] [{nivel}] {mensagem}"
+    print(texto)
+    sb.table("logs").insert({
+        "origem": origem,
+        "nivel": nivel,
+        "mensagem": mensagem,
+        "timestamp": datetime.utcnow().isoformat()
+    }).execute()
+
+# =====================================================
+# NORMALIZAÇÃO UNIVERSAL
+# =====================================================
+
+def normalizar_evento(payload: Dict[str, Any]) -> Dict[str, Any]:
+    evento = {
+        "plataforma": payload.get("plataforma", "desconhecida"),
+        "produto": payload.get("produto"),
+        "valor": float(payload.get("valor", 0)),
+        "comissao": float(payload.get("comissao", 0)),
+        "status": payload.get("status"),
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    return evento
+
+# =====================================================
+# REGISTROS
+# =====================================================
+
+def registrar_evento(evento: Dict[str, Any]):
+    sb.table("eventos").insert(evento).execute()
 
 
-@app.get("/estado")
-def estado():
-    return estado_atual() or {}
+def registrar_decisao(decisao: Dict[str, Any]):
+    sb.table("decisoes").insert(decisao).execute()
 
+
+def atualizar_capital(valor: float):
+    estado_global["capital"] += valor
+    sb.table("capital").insert({
+        "valor": valor,
+        "total": estado_global["capital"],
+        "timestamp": datetime.utcnow().isoformat()
+    }).execute()
+
+# =====================================================
+# MOTOR DE DECISÃO ECONÔMICA
+# =====================================================
+
+def calcular_rentabilidade(evento: Dict[str, Any]) -> float:
+    if evento["valor"] == 0:
+        return 0.0
+    return evento["comissao"] / evento["valor"]
+
+
+def decidir_acao(evento: Dict[str, Any]) -> Dict[str, Any]:
+    roi = calcular_rentabilidade(evento)
+
+    if roi > 0.5:
+        acao = "ESCALAR"
+    elif roi > 0.2:
+        acao = "MANTER"
+    else:
+        acao = "PAUSAR"
+
+    decisao = {
+        "produto": evento["produto"],
+        "plataforma": evento["plataforma"],
+        "acao": acao,
+        "roi": roi,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    return decisao
+
+# =====================================================
+# LOOP AUTÔNOMO
+# =====================================================
+
+async def loop_autonomo():
+    log("LOOP", "INFO", "Loop autônomo iniciado")
+    estado_global["status"] = "OPERANDO"
+
+    while True:
+        try:
+            eventos = sb.table("eventos").select("*").order("timestamp", desc=True).limit(5).execute().data
+            for evento in eventos:
+                decisao = decidir_acao(evento)
+                registrar_decisao(decisao)
+            estado_global["ultimo_ciclo"] = datetime.utcnow().isoformat()
+        except Exception as e:
+            log("LOOP", "ERRO", str(e))
+            estado_global["status"] = "ERRO"
+        await asyncio.sleep(10)
+
+# =====================================================
+# BACKGROUND WORKER
+# =====================================================
+
+def iniciar_background():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(loop_autonomo())
+
+threading.Thread(target=iniciar_background, daemon=True).start()
+
+# =====================================================
+# WEBHOOK UNIVERSAL
+# =====================================================
+
+@app.post("/webhook/universal")
+async def webhook_universal(request: Request):
+    payload = await request.json()
+    evento = normalizar_evento(payload)
+    registrar_evento(evento)
+    atualizar_capital(evento["comissao"])
+    return {"status": "EVENTO REGISTRADO"}
+
+# =====================================================
+# ENDPOINTS DE STATUS
+# =====================================================
 
 @app.get("/status")
-def status():
-    return estado()
-
-# =====================================================
-# CICLO AUTÔNOMO — DECIDE
-# =====================================================
-
-@app.post("/ciclo")
-def ciclo():
-    bootstrap()
-
-    global acao_pendente
-    acao_pendente = {
-        "tipo": "PUBLICAR_E_ATIVAR_TRAFEGO",
-        "criada_em": datetime.utcnow().isoformat()
-    }
-
+async def status():
     return {
-        "status": "acao_pendente",
-        "acao": acao_pendente
+        "robo": APP_NAME,
+        "estado": estado_global
     }
 
-# =====================================================
-# CONFIRMAÇÃO HUMANA — EXECUTA
-# =====================================================
+@app.get("/capital")
+async def capital():
+    return {
+        "capital": estado_global["capital"]
+    }
 
-@app.post("/confirmar-acao")
-def confirmar_acao():
-    global acao_pendente
-
-    if not acao_pendente["tipo"]:
-        return {"status": "nenhuma_acao"}
-
-    # ===== AÇÃO REAL A — PUBLICAÇÃO =====
-    webhook_publicacao = os.getenv("WEBHOOK_PUBLICACAO_URL")
-    if webhook_publicacao:
-        requests.post(webhook_publicacao, json={
-            "acao": "PUBLICAR_CONTEUDO",
-            "origem": "ROBO_GLOBAL_AI",
-            "timestamp": datetime.utcnow().isoformat()
-        }, timeout=10)
-
-    # ===== AÇÃO REAL B — TRÁFEGO =====
-    webhook_trafego = os.getenv("WEBHOOK_TRAFEGO_URL")
-    if webhook_trafego:
-        requests.post(webhook_trafego, json={
-            "acao": "ATIVAR_TRAFEGO",
-            "orcamento_diario": 10,
-            "origem": "ROBO_GLOBAL_AI",
-            "timestamp": datetime.utcnow().isoformat()
-        }, timeout=10)
-
-    estado = estado_atual()
-    capital_antes = estado["capital"]
-
-    ciclo = sb().table("ciclos").insert({
-        "decisao": acao_pendente["tipo"],
-        "resultado": "EXECUTADO",
-        "capital_antes": capital_antes,
-        "capital_depois": capital_antes,
-        "status": "SUCESSO",
-        "payload": acao_pendente
-    }).execute()
-
-    sb().table("estado_atual").update({
-        "ultima_decisao": acao_pendente["tipo"],
-        "ultimo_ciclo_id": ciclo.data[0]["id"],
-        "atualizado_em": datetime.utcnow().isoformat()
-    }).eq("id", 1).execute()
-
-    acao_pendente = {"tipo": None, "criada_em": None}
-
-    return {"status": "acao_real_executada"}
+@app.get("/decisoes")
+async def decisoes():
+    dados = sb.table("decisoes").select("*").order("timestamp", desc=True).limit(20).execute().data
+    return dados
 
 # =====================================================
-# WEBHOOK HOTMART
+# FIM DO ARQUIVO
 # =====================================================
-
-@app.post("/webhook/hotmart")
-def webhook_hotmart(payload: dict):
-    valor = float(payload.get("purchase", {}).get("price", 0))
-    if not limite_ok(valor):
-        return {"ok": False}
-
-    estado = estado_atual()
-    antes = estado["capital"]
-    depois = antes + valor
-
-    ciclo = sb().table("ciclos").insert({
-        "decisao": "VENDA_HOTMART",
-        "resultado": "CONFIRMADA",
-        "capital_antes": antes,
-        "capital_depois": depois,
-        "status": "SUCESSO",
-        "payload": payload
-    }).execute()
-
-    sb().table("estado_atual").update({
-        "capital": depois,
-        "ultima_decisao": "VENDA_HOTMART",
-        "ultimo_ciclo_id": ciclo.data[0]["id"],
-        "atualizado_em": datetime.utcnow().isoformat()
-    }).eq("id", 1).execute()
-
-    return {"ok": True}
-
-# =====================================================
-# WEBHOOK EDUZZ
-# =====================================================
-
-@app.post("/webhook/eduzz")
-def webhook_eduzz(payload: dict):
-    valor = float(payload.get("transaction", {}).get("price", 0))
-    if not limite_ok(valor):
-        return {"ok": False}
-
-    estado = estado_atual()
-    antes = estado["capital"]
-    depois = antes + valor
-
-    ciclo = sb().table("ciclos").insert({
-        "decisao": "VENDA_EDUZZ",
-        "resultado": "CONFIRMADA",
-        "capital_antes": antes,
-        "capital_depois": depois,
-        "status": "SUCESSO",
-        "payload": payload
-    }).execute()
-
-    sb().table("estado_atual").update({
-        "capital": depois,
-        "ultima_decisao": "VENDA_EDUZZ",
-        "ultimo_ciclo_id": ciclo.data[0]["id"],
-        "atualizado_em": datetime.utcnow().isoformat()
-    }).eq("id", 1).execute()
-
-    return {"ok": True}
