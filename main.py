@@ -1,33 +1,35 @@
-# main.py — ROBO GLOBAL AI — VERSÃO FINAL CORRETA PARA RENDER
-# OPERAÇÃO REAL • LOOP AUTÔNOMO • FASTAPI • BACKGROUND WORKER
+# main.py — ROBO GLOBAL AI
+# FASE 2.1 • FONTE ATIVA 3 • RAPIDAPI
+# AGENTE ECONÔMICO AUTÔNOMO • LOOP ATIVO • RENDER
 
 import os
 import asyncio
 import threading
+import requests
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, List
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client
 
 # =====================================================
-# CONFIGURAÇÕES GERAIS
+# CONFIGURAÇÕES BÁSICAS
 # =====================================================
 
 APP_NAME = "ROBO GLOBAL AI"
-ENV = os.getenv("ENV", "production")
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
 
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise RuntimeError("SUPABASE NÃO CONFIGURADO")
+if not SUPABASE_URL or not SUPABASE_KEY or not RAPIDAPI_KEY:
+    raise RuntimeError("CONFIGURAÇÃO INCOMPLETA")
 
 sb = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # =====================================================
-# FASTAPI APP
+# FASTAPI
 # =====================================================
 
 app = FastAPI(title=APP_NAME)
@@ -41,174 +43,136 @@ app.add_middleware(
 )
 
 # =====================================================
-# ESTADO GLOBAL DO ROBÔ
+# ESTADO GLOBAL
 # =====================================================
 
-estado_global = {
+estado = {
     "status": "INICIALIZANDO",
-    "capital": 0.0,
-    "modo": "CONSERVADOR",
     "ultimo_ciclo": None,
+    "tarefas_avaliadas": 0,
+    "tarefas_executadas": 0,
 }
 
 # =====================================================
-# LOG E REGISTRO
+# LOG
 # =====================================================
 
-def log(origem: str, nivel: str, mensagem: str):
-    print(f"[{origem}] [{nivel}] {mensagem}")
+def log(origem: str, nivel: str, msg: str):
+    print(f"[{origem}] [{nivel}] {msg}")
     sb.table("logs").insert({
         "origem": origem,
         "nivel": nivel,
-        "mensagem": mensagem,
+        "mensagem": msg,
         "timestamp": datetime.utcnow().isoformat(),
     }).execute()
 
 # =====================================================
-# NORMALIZAÇÃO DE EVENTOS
+# FONTE ATIVA — RAPIDAPI
 # =====================================================
 
-def normalizar_evento(payload: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        "plataforma": payload.get("plataforma", "desconhecida"),
-        "produto": payload.get("produto"),
-        "valor": float(payload.get("valor", 0)),
-        "comissao": float(payload.get("comissao", 0)),
-        "status": payload.get("status"),
-        "timestamp": datetime.utcnow().isoformat(),
+def buscar_tarefas_rapidapi() -> List[Dict[str, Any]]:
+    headers = {
+        "X-RapidAPI-Key": RAPIDAPI_KEY,
+        "X-RapidAPI-Host": "contextualwebsearch-websearch-v1.p.rapidapi.com",
     }
 
+    params = {
+        "q": "api task bounty automation",
+        "pageNumber": "1",
+        "pageSize": "5",
+        "autoCorrect": "true",
+    }
+
+    response = requests.get(
+        "https://contextualwebsearch-websearch-v1.p.rapidapi.com/api/Search/WebSearchAPI",
+        headers=headers,
+        params=params,
+        timeout=10,
+    )
+
+    if response.status_code != 200:
+        return []
+
+    data = response.json().get("value", [])
+    tarefas = []
+
+    for item in data:
+        tarefas.append({
+            "id_externo": item.get("id"),
+            "titulo": item.get("title"),
+            "descricao": item.get("description"),
+            "valor_estimado": 1.0,
+            "timestamp": datetime.utcnow().isoformat(),
+        })
+
+    return tarefas
+
 # =====================================================
-# REGISTROS FINANCEIROS
+# MOTOR DE DECISÃO
 # =====================================================
 
-def registrar_evento(evento: Dict[str, Any]):
-    sb.table("eventos").insert(evento).execute()
+def decidir_execucao(tarefa: Dict[str, Any]) -> bool:
+    return tarefa.get("valor_estimado", 0) > 0.5
 
+# =====================================================
+# EXECUTOR (SEGURO)
+# =====================================================
 
-def registrar_decisao(decisao: Dict[str, Any]):
-    sb.table("decisoes").insert(decisao).execute()
-
-
-def atualizar_capital(valor: float):
-    estado_global["capital"] += valor
-    sb.table("capital").insert({
-        "valor": valor,
-        "total": estado_global["capital"],
+def executar_tarefa(tarefa: Dict[str, Any]):
+    sb.table("tarefas_executadas").insert({
+        "id_externo": tarefa["id_externo"],
+        "titulo": tarefa["titulo"],
         "timestamp": datetime.utcnow().isoformat(),
     }).execute()
 
 # =====================================================
-# MOTOR DE DECISÃO ECONÔMICA
+# LOOP AUTÔNOMO ATIVO
 # =====================================================
 
-def calcular_rentabilidade(evento: Dict[str, Any]) -> float:
-    if evento["valor"] <= 0:
-        return 0.0
-    return evento["comissao"] / evento["valor"]
-
-
-def decidir_acao(evento: Dict[str, Any]) -> Dict[str, Any]:
-    roi = calcular_rentabilidade(evento)
-
-    if roi >= 0.5:
-        acao = "ESCALAR"
-    elif roi >= 0.2:
-        acao = "MANTER"
-    else:
-        acao = "PAUSAR"
-
-    return {
-        "produto": evento["produto"],
-        "plataforma": evento["plataforma"],
-        "acao": acao,
-        "roi": roi,
-        "timestamp": datetime.utcnow().isoformat(),
-    }
-
-# =====================================================
-# LOOP AUTÔNOMO (BACKGROUND WORKER)
-# =====================================================
-
-async def loop_autonomo():
-    log("LOOP", "INFO", "Loop autônomo iniciado")
-    estado_global["status"] = "OPERANDO"
+async def loop_ativo():
+    log("LOOP", "INFO", "Loop ativo iniciado (RapidAPI)")
+    estado["status"] = "OPERANDO"
 
     while True:
         try:
-            eventos = (
-                sb.table("eventos")
-                .select("*")
-                .order("timestamp", desc=True)
-                .limit(5)
-                .execute()
-                .data
-            )
+            tarefas = buscar_tarefas_rapidapi()
+            for tarefa in tarefas:
+                estado["tarefas_avaliadas"] += 1
 
-            for evento in eventos:
-                decisao = decidir_acao(evento)
-                registrar_decisao(decisao)
+                sb.table("tarefas_recebidas").insert(tarefa).execute()
 
-            estado_global["ultimo_ciclo"] = datetime.utcnow().isoformat()
+                if decidir_execucao(tarefa):
+                    executar_tarefa(tarefa)
+                    estado["tarefas_executadas"] += 1
+
+            estado["ultimo_ciclo"] = datetime.utcnow().isoformat()
 
         except Exception as e:
             log("LOOP", "ERRO", str(e))
-            estado_global["status"] = "ERRO"
+            estado["status"] = "ERRO"
 
-        await asyncio.sleep(10)
+        await asyncio.sleep(30)
 
 # =====================================================
 # STARTUP EVENT (RENDER SAFE)
 # =====================================================
 
 @app.on_event("startup")
-async def startup_event():
-    def start_loop():
+async def startup():
+    def runner():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        loop.run_until_complete(loop_autonomo())
+        loop.run_until_complete(loop_ativo())
 
-    threading.Thread(target=start_loop, daemon=True).start()
-
-# =====================================================
-# WEBHOOK UNIVERSAL
-# =====================================================
-
-@app.post("/webhook/universal")
-async def webhook_universal(request: Request):
-    payload = await request.json()
-    evento = normalizar_evento(payload)
-    registrar_evento(evento)
-    atualizar_capital(evento["comissao"])
-    return {"status": "OK"}
+    threading.Thread(target=runner, daemon=True).start()
 
 # =====================================================
-# ENDPOINTS DE CONTROLE
+# ENDPOINT STATUS
 # =====================================================
 
 @app.get("/status")
-async def status():
-    return {
-        "robo": APP_NAME,
-        "estado": estado_global,
-    }
-
-
-@app.get("/capital")
-async def capital():
-    return {"capital": estado_global["capital"]}
-
-
-@app.get("/decisoes")
-async def decisoes():
-    return (
-        sb.table("decisoes")
-        .select("*")
-        .order("timestamp", desc=True)
-        .limit(20)
-        .execute()
-        .data
-    )
+def status():
+    return estado
 
 # =====================================================
 # FIM DO ARQUIVO
