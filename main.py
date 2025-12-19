@@ -233,3 +233,41 @@ def billing_status():
 def startup():
     t = threading.Thread(target=loop_autonomo, daemon=True)
     t.start()
+
+@app.get("/status")
+def status():
+    ...
+    return {...}
+
+@app.get("/financeiro/resumo")
+def resumo_financeiro():
+    try:
+        resposta = supabase.table("eventos_financeiros").select(
+            "valor_total, criado_em"
+        ).execute()
+
+        dados = resposta.data or []
+
+        if not dados:
+            return {
+                "total_eventos": 0,
+                "receita_total": 0,
+                "primeiro_evento": None,
+                "ultimo_evento": None
+            }
+
+        valores = [float(d["valor_total"]) for d in dados if d["valor_total"] is not None]
+        datas = [d["criado_em"] for d in dados if d["criado_em"] is not None]
+
+        return {
+            "total_eventos": len(dados),
+            "receita_total": round(sum(valores), 2),
+            "primeiro_evento": min(datas),
+            "ultimo_evento": max(datas)
+        }
+
+    except Exception as e:
+        return {
+            "status": "ERRO",
+            "mensagem": str(e)
+        }
