@@ -1,36 +1,41 @@
 # main.py — versão completa e final
-# ROBO GLOBAL AI — OPERAÇÃO FINANCEIRA REAL + VISUAL HUMANO
-# Backend FastAPI • Supabase • Webhooks • Decisão Econômica • Endpoint Financeiro Humano
+# ROBO GLOBAL AI — FASE 2
+# Operação financeira real + visual humano
+# Continuidade direta do estado anterior
 
 import os
 import hmac
 import hashlib
 import uuid
 from datetime import datetime
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 
 from fastapi import FastAPI, Request, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-
 from supabase import create_client, Client
 
 # =====================================================
-# CONFIGURAÇÃO BÁSICA
+# CONFIGURAÇÃO GLOBAL
 # =====================================================
 
 APP_NAME = "ROBO GLOBAL AI"
 ENV = os.getenv("ENV", "production")
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_SERVICE_ROLE = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+
+# 🔒 CORREÇÃO DEFINITIVA — SEM LOOPING DE VARIÁVEIS
+SUPABASE_KEY = (
+    os.getenv("SUPABASE_SERVICE_ROLE")
+    or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    or os.getenv("SUPABASE_KEY")
+)
 
 HOTMART_SECRET = os.getenv("HOTMART_SECRET", "")
 EDUZZ_SECRET = os.getenv("EDUZZ_SECRET", "")
 KIWIFY_SECRET = os.getenv("KIWIFY_SECRET", "")
 
-if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE:
-    raise RuntimeError("SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY não configurados")
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise RuntimeError("Supabase não configurado no ambiente")
 
 # =====================================================
 # APP
@@ -51,21 +56,20 @@ app.add_middleware(
 # =====================================================
 
 def get_supabase() -> Client:
-    return create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE)
+    return create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # =====================================================
-# LOGS PADRÃO
+# LOG PADRÃO
 # =====================================================
 
 def log(origem: str, nivel: str, mensagem: str, extra: Optional[Dict] = None):
-    payload = {
-        "timestamp": datetime.utcnow().isoformat(),
+    print({
+        "ts": datetime.utcnow().isoformat(),
         "origem": origem,
         "nivel": nivel,
         "mensagem": mensagem,
-        "extra": extra or {},
-    }
-    print(payload)
+        "extra": extra or {}
+    })
 
 # =====================================================
 # SEGURANÇA HMAC
@@ -74,19 +78,18 @@ def log(origem: str, nivel: str, mensagem: str, extra: Optional[Dict] = None):
 def validar_hmac(body: bytes, assinatura: str, secret: str) -> bool:
     if not secret:
         return True
-    mac = hmac.new(secret.encode(), msg=body, digestmod=hashlib.sha256).hexdigest()
+    mac = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
     return hmac.compare_digest(mac, assinatura)
 
 # =====================================================
-# NORMALIZAÇÃO UNIVERSAL
+# NORMALIZAÇÃO FINANCEIRA
 # =====================================================
 
 def normalizar_evento(origem: str, dados: Dict[str, Any]) -> Dict[str, Any]:
-    valor = float(dados.get("valor", dados.get("price", dados.get("value", 0))))
+    valor = float(dados.get("valor") or dados.get("price") or dados.get("value") or 0)
     token = dados.get("token") or dados.get("transaction_id") or str(uuid.uuid4())
 
     return {
-        "origem": origem,
         "valor_total": valor,
         "valor_unitario": valor,
         "token": token,
@@ -99,51 +102,18 @@ def normalizar_evento(origem: str, dados: Dict[str, Any]) -> Dict[str, Any]:
 # REGISTRO FINANCEIRO REAL
 # =====================================================
 
-def registrar_evento_financeiro(evento: Dict[str, Any]):
+def registrar_evento(evento: Dict[str, Any]):
     sb = get_supabase()
-    sb.table("eventos_financeiros").insert({
-        "valor_total": evento["valor_total"],
-        "valor_unitario": evento["valor_unitario"],
-        "token": evento["token"],
-        "criado_em": evento["criado_em"],
-        "eu_ia": evento["eu_ia"],
-        "sim": evento["sim"],
-    }).execute()
+    sb.table("eventos_financeiros").insert(evento).execute()
 
 # =====================================================
-# DECISÃO ECONÔMICA (MVP REAL)
-# =====================================================
-
-def calcular_rentabilidade():
-    sb = get_supabase()
-    res = sb.table("eventos_financeiros").select("valor_total").execute()
-    total = sum([r["valor_total"] for r in res.data])
-    return {
-        "total_recebido": total,
-        "eventos": len(res.data),
-        "media": total / len(res.data) if res.data else 0,
-    }
-
-def decisao_economica():
-    rent = calcular_rentabilidade()
-    if rent["media"] > 50:
-        acao = "ESCALAR"
-    else:
-        acao = "MANTER"
-    return {
-        "rentabilidade": rent,
-        "decisao": acao,
-        "timestamp": datetime.utcnow().isoformat(),
-    }
-
-# =====================================================
-# PIPELINE OPERACIONAL
+# PIPELINE
 # =====================================================
 
 def processar_evento(origem: str, dados: Dict[str, Any]):
     evento = normalizar_evento(origem, dados)
-    registrar_evento_financeiro(evento)
-    log("PIPELINE", "INFO", "Evento financeiro registrado", evento)
+    registrar_evento(evento)
+    log("PIPELINE", "INFO", f"Evento financeiro registrado ({origem})", evento)
     return evento
 
 # =====================================================
@@ -154,7 +124,7 @@ def processar_evento(origem: str, dados: Dict[str, Any]):
 async def webhook_universal(request: Request):
     body = await request.json()
     evento = processar_evento("universal", body)
-    return {"status": "ok", "evento": evento}
+    return {"ok": True, "evento": evento}
 
 @app.post("/webhook/hotmart")
 async def webhook_hotmart(
@@ -163,10 +133,9 @@ async def webhook_hotmart(
 ):
     raw = await request.body()
     if not validar_hmac(raw, x_hotmart_hmac_sha256 or "", HOTMART_SECRET):
-        raise HTTPException(status_code=403, detail="HMAC inválido")
+        raise HTTPException(status_code=403)
     body = await request.json()
-    evento = processar_evento("hotmart", body)
-    return {"status": "ok", "evento": evento}
+    return processar_evento("hotmart", body)
 
 @app.post("/webhook/eduzz")
 async def webhook_eduzz(
@@ -175,22 +144,24 @@ async def webhook_eduzz(
 ):
     raw = await request.body()
     if not validar_hmac(raw, x_eduzz_signature or "", EDUZZ_SECRET):
-        raise HTTPException(status_code=403, detail="HMAC inválido")
+        raise HTTPException(status_code=403)
     body = await request.json()
-    evento = processar_evento("eduzz", body)
-    return {"status": "ok", "evento": evento}
+    return processar_evento("eduzz", body)
 
-@app.post("/webhook/kiwify")
-async def webhook_kiwify(
-    request: Request,
-    x_kiwify_signature: Optional[str] = Header(None),
-):
-    raw = await request.body()
-    if not validar_hmac(raw, x_kiwify_signature or "", KIWIFY_SECRET):
-        raise HTTPException(status_code=403, detail="HMAC inválido")
-    body = await request.json()
-    evento = processar_evento("kiwify", body)
-    return {"status": "ok", "evento": evento}
+# =====================================================
+# MÉTRICAS FINANCEIRAS
+# =====================================================
+
+def resumo_financeiro():
+    sb = get_supabase()
+    res = sb.table("eventos_financeiros").select("valor_total").execute()
+    total = sum(r["valor_total"] for r in res.data)
+    qtd = len(res.data)
+    return {
+        "total_recebido": total,
+        "eventos": qtd,
+        "media": total / qtd if qtd else 0
+    }
 
 # =====================================================
 # ENDPOINTS OPERACIONAIS
@@ -201,30 +172,29 @@ def status():
     return {
         "app": APP_NAME,
         "env": ENV,
-        "time": datetime.utcnow().isoformat(),
         "status": "online",
+        "ts": datetime.utcnow().isoformat()
     }
 
 @app.get("/capital")
 def capital():
-    return calcular_rentabilidade()
+    return resumo_financeiro()
 
 @app.get("/decisao")
 def decisao():
-    return decisao_economica()
-
-@app.post("/ciclo")
-def executar_ciclo():
-    decisao = decisao_economica()
-    log("CICLO", "INFO", "Ciclo executado", decisao)
-    return decisao
+    r = resumo_financeiro()
+    return {
+        **r,
+        "decisao": "ESCALAR" if r["media"] > 50 else "MANTER",
+        "ts": datetime.utcnow().isoformat()
+    }
 
 @app.get("/resultado")
 def resultado():
-    return decisao_economica()
+    return resumo_financeiro()
 
 # =====================================================
-# ENDPOINT FINANCEIRO HUMANO (VISUAL)
+# ENDPOINT FINANCEIRO HUMANO (FASE 2)
 # =====================================================
 
 @app.get("/financeiro/resumo")
@@ -236,29 +206,11 @@ def financeiro_resumo():
         .limit(50) \
         .execute()
 
-    total = sum([r["valor_total"] for r in res.data])
+    total = sum(r["valor_total"] for r in res.data)
 
     return {
         "total_recebido": total,
         "quantidade_eventos": len(res.data),
         "ultimos_eventos": res.data,
-        "atualizado_em": datetime.utcnow().isoformat(),
-    }
-
-# =====================================================
-# WIDGET RANKING (HUMANO)
-# =====================================================
-
-@app.get("/widget-ranking")
-def widget_ranking():
-    sb = get_supabase()
-    res = sb.table("eventos_financeiros") \
-        .select("token, valor_total") \
-        .execute()
-
-    ranking = sorted(res.data, key=lambda x: x["valor_total"], reverse=True)
-
-    return {
-        "ranking": ranking[:10],
-        "gerado_em": datetime.utcnow().isoformat(),
+        "atualizado_em": datetime.utcnow().isoformat()
     }
