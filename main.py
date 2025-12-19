@@ -1,23 +1,20 @@
 # main.py — ROBO GLOBAL AI
-# FASE 2.1 • FONTE ATIVA 3 • RAPIDAPI (JSEARCH)
-# AGENTE ECONÔMICO AUTÔNOMO • LOOP ATIVO • RENDER
+# FASE 2A — EXECUÇÃO FINANCEIRA REAL (API + FEED)
 
 import os
-import asyncio
+import time
 import threading
+from datetime import datetime, timezone
+from typing import Optional, List
+
 import requests
-from datetime import datetime
-from typing import Dict, Any, List
-
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from supabase import create_client
+from supabase import create_client, Client
 
 # =====================================================
-# CONFIGURAÇÕES
+# CONFIGURAÇÃO OBRIGATÓRIA
 # =====================================================
-
-APP_NAME = "ROBO GLOBAL AI"
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
@@ -26,27 +23,26 @@ RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
 if not SUPABASE_URL or not SUPABASE_KEY or not RAPIDAPI_KEY:
     raise RuntimeError("CONFIGURAÇÃO INCOMPLETA")
 
-sb = create_client(SUPABASE_URL, SUPABASE_KEY)
+sb: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # =====================================================
-# FASTAPI
+# APP
 # =====================================================
 
-app = FastAPI(title=APP_NAME)
+app = FastAPI(title="ROBO GLOBAL AI")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # =====================================================
-# ESTADO GLOBAL
+# ESTADO GLOBAL DO ROBO
 # =====================================================
 
-estado = {
+ESTADO = {
     "status": "INICIALIZANDO",
     "ultimo_ciclo": None,
     "tarefas_avaliadas": 0,
@@ -57,121 +53,165 @@ estado = {
 # LOG
 # =====================================================
 
-def log(origem: str, nivel: str, msg: str):
-    print(f"[{origem}] [{nivel}] {msg}")
-    sb.table("logs").insert({
-        "origem": origem,
-        "nivel": nivel,
-        "mensagem": msg,
-        "timestamp": datetime.utcnow().isoformat(),
-    }).execute()
+def log(origem: str, nivel: str, mensagem: str):
+    try:
+        sb.table("logs").insert({
+            "origem": origem,
+            "nivel": nivel,
+            "mensagem": mensagem,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }).execute()
+    except Exception:
+        pass
 
 # =====================================================
-# FONTE ATIVA — JSEARCH (RAPIDAPI)
+# FONTE DE DADOS — RAPIDAPI / JSEARCH
 # =====================================================
 
-def buscar_tarefas_jsearch() -> List[Dict[str, Any]]:
+def buscar_oportunidades():
     url = "https://jsearch.p.rapidapi.com/search"
-
     headers = {
         "X-RapidAPI-Key": RAPIDAPI_KEY,
-        "X-RapidAPI-Host": "jsearch.p.rapidapi.com",
+        "X-RapidAPI-Host": "jsearch.p.rapidapi.com"
     }
-
     params = {
-        "query": "software automation remote",
+        "query": "software engineer",
         "page": "1",
-        "num_pages": "1",
+        "num_pages": "1"
     }
 
-    response = requests.get(url, headers=headers, params=params, timeout=10)
+    resp = requests.get(url, headers=headers, params=params, timeout=30)
+    resp.raise_for_status()
+    data = resp.json()
 
-    if response.status_code != 200:
-        return []
-
-    data = response.json().get("data", [])
-    tarefas = []
-
-    for item in data:
-        tarefas.append({
+    oportunidades = []
+    for item in data.get("data", []):
+        oportunidades.append({
             "id_externo": item.get("job_id"),
             "titulo": item.get("job_title"),
-            "descricao": item.get("job_description"),
             "empresa": item.get("employer_name"),
-            "valor_estimado": 1.0,
-            "timestamp": datetime.utcnow().isoformat(),
+            "pais": item.get("job_country"),
+            "categoria": item.get("job_employment_type"),
+            "valor_estimado": item.get("job_salary_max") or 0,
+            "timestamp": datetime.now(timezone.utc).isoformat()
         })
-
-    return tarefas
-
-# =====================================================
-# MOTOR DE DECISÃO
-# =====================================================
-
-def decidir_execucao(tarefa: Dict[str, Any]) -> bool:
-    return tarefa.get("valor_estimado", 0) > 0.5
+    return oportunidades
 
 # =====================================================
-# EXECUTOR SEGURO
+# LOOP AUTÔNOMO
 # =====================================================
 
-def executar_tarefa(tarefa: Dict[str, Any]):
-    sb.table("tarefas_executadas").insert({
-        "id_externo": tarefa["id_externo"],
-        "titulo": tarefa["titulo"],
-        "empresa": tarefa["empresa"],
-        "timestamp": datetime.utcnow().isoformat(),
-    }).execute()
-
-# =====================================================
-# LOOP AUTÔNOMO ATIVO
-# =====================================================
-
-async def loop_ativo():
-    log("LOOP", "INFO", "Loop ativo iniciado (JSearch)")
-    estado["status"] = "OPERANDO"
+def loop_autonomo():
+    global ESTADO
+    log("LOOP", "INFO", "Loop autônomo iniciado")
+    ESTADO["status"] = "OPERANDO"
 
     while True:
         try:
-            tarefas = buscar_tarefas_jsearch()
+            oportunidades = buscar_oportunidades()
+            ESTADO["tarefas_avaliadas"] += len(oportunidades)
 
-            for tarefa in tarefas:
-                estado["tarefas_avaliadas"] += 1
-                sb.table("tarefas_recebidas").insert(tarefa).execute()
+            for op in oportunidades:
+                sb.table("tarefas_recebidas").insert(op).execute()
+                ESTADO["tarefas_executadas"] += 1
 
-                if decidir_execucao(tarefa):
-                    executar_tarefa(tarefa)
-                    estado["tarefas_executadas"] += 1
-
-            estado["ultimo_ciclo"] = datetime.utcnow().isoformat()
-
+            ESTADO["ultimo_ciclo"] = datetime.now(timezone.utc).isoformat()
         except Exception as e:
+            ESTADO["status"] = "ERRO"
             log("LOOP", "ERRO", str(e))
-            estado["status"] = "ERRO"
-
-        await asyncio.sleep(30)
+        time.sleep(60)
 
 # =====================================================
-# STARTUP EVENT (RENDER SAFE)
-# =====================================================
-
-@app.on_event("startup")
-async def startup():
-    def runner():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(loop_ativo())
-
-    threading.Thread(target=runner, daemon=True).start()
-
-# =====================================================
-# STATUS
+# ENDPOINT STATUS
 # =====================================================
 
 @app.get("/status")
 def status():
-    return estado
+    return ESTADO
 
 # =====================================================
-# FIM DO ARQUIVO
+# API MONETIZADA — CONSUMO SOB DEMANDA
 # =====================================================
+
+@app.get("/api/oportunidades")
+def api_oportunidades(
+    authorization: Optional[str] = Header(None),
+    limit: int = 50
+):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Token ausente")
+
+    token = authorization.replace("Bearer ", "").strip()
+
+    token_row = sb.table("api_tokens").select("*").eq("token", token).eq("ativo", True).single().execute().data
+    if not token_row:
+        raise HTTPException(status_code=403, detail="Token inválido")
+
+    dados = sb.table("tarefas_recebidas").select("*").limit(limit).execute().data
+    quantidade = len(dados)
+
+    if quantidade > 0:
+        valor_unitario = float(token_row["valor_unitario"])
+        sb.table("eventos_financeiros").insert({
+            "origem": "API",
+            "token": token,
+            "quantidade": quantidade,
+            "valor_unitario": valor_unitario,
+            "valor_total": quantidade * valor_unitario,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }).execute()
+
+    return {
+        "meta": {
+            "quantidade": quantidade,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        },
+        "dados": dados
+    }
+
+# =====================================================
+# FEED MONETIZADO — CONSUMO PERIÓDICO
+# =====================================================
+
+@app.get("/feed/oportunidades/{feed_token}")
+def feed_oportunidades(feed_token: str):
+    token_row = sb.table("feed_tokens").select("*").eq("token", feed_token).eq("ativo", True).single().execute().data
+    if not token_row:
+        raise HTTPException(status_code=403, detail="Token inválido")
+
+    ultimo = token_row.get("ultimo_consumo")
+    query = sb.table("tarefas_recebidas").select("*")
+    if ultimo:
+        query = query.gt("timestamp", ultimo)
+
+    dados = query.execute().data
+    quantidade = len(dados)
+
+    if quantidade > 0:
+        valor_unitario = float(token_row["valor_unitario"])
+        sb.table("eventos_financeiros").insert({
+            "origem": "FEED",
+            "token": feed_token,
+            "quantidade": quantidade,
+            "valor_unitario": valor_unitario,
+            "valor_total": quantidade * valor_unitario,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }).execute()
+
+        sb.table("feed_tokens").update({
+            "ultimo_consumo": datetime.now(timezone.utc).isoformat()
+        }).eq("token", feed_token).execute()
+
+    return {
+        "quantidade": quantidade,
+        "dados": dados
+    }
+
+# =====================================================
+# STARTUP
+# =====================================================
+
+@app.on_event("startup")
+def startup():
+    t = threading.Thread(target=loop_autonomo, daemon=True)
+    t.start()
