@@ -1,11 +1,12 @@
 # main.py — ROBO GLOBAL AI
-# FASE 2A — EXECUÇÃO FINANCEIRA REAL (API + FEED)
+# FASE 2A.4 — ATIVAÇÃO DE RECEITA REAL (A+B)
+# API + FEED + BILLING AUTOMÁTICO
 
 import os
 import time
 import threading
 from datetime import datetime, timezone
-from typing import Optional, List
+from typing import Optional
 
 import requests
 from fastapi import FastAPI, Header, HTTPException
@@ -13,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client, Client
 
 # =====================================================
-# CONFIGURAÇÃO OBRIGATÓRIA
+# CONFIGURAÇÃO
 # =====================================================
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -29,7 +30,7 @@ sb: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # APP
 # =====================================================
 
-app = FastAPI(title="ROBO GLOBAL AI")
+app = FastAPI(title="ROBO GLOBAL AI — Monetização Real")
 
 app.add_middleware(
     CORSMiddleware,
@@ -39,7 +40,7 @@ app.add_middleware(
 )
 
 # =====================================================
-# ESTADO GLOBAL DO ROBO
+# ESTADO GLOBAL
 # =====================================================
 
 ESTADO = {
@@ -50,8 +51,11 @@ ESTADO = {
 }
 
 # =====================================================
-# LOG
+# UTIL
 # =====================================================
+
+def now_iso():
+    return datetime.now(timezone.utc).isoformat()
 
 def log(origem: str, nivel: str, mensagem: str):
     try:
@@ -59,13 +63,13 @@ def log(origem: str, nivel: str, mensagem: str):
             "origem": origem,
             "nivel": nivel,
             "mensagem": mensagem,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": now_iso()
         }).execute()
     except Exception:
         pass
 
 # =====================================================
-# FONTE DE DADOS — RAPIDAPI / JSEARCH
+# FONTE — RAPIDAPI / JSEARCH
 # =====================================================
 
 def buscar_oportunidades():
@@ -80,22 +84,21 @@ def buscar_oportunidades():
         "num_pages": "1"
     }
 
-    resp = requests.get(url, headers=headers, params=params, timeout=30)
-    resp.raise_for_status()
-    data = resp.json()
+    r = requests.get(url, headers=headers, params=params, timeout=30)
+    r.raise_for_status()
+    data = r.json()
 
-    oportunidades = []
+    ops = []
     for item in data.get("data", []):
-        oportunidades.append({
+        ops.append({
             "id_externo": item.get("job_id"),
             "titulo": item.get("job_title"),
             "empresa": item.get("employer_name"),
-            "pais": item.get("job_country"),
-            "categoria": item.get("job_employment_type"),
+            "descricao": item.get("job_description"),
             "valor_estimado": item.get("job_salary_max") or 0,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": now_iso()
         })
-    return oportunidades
+    return ops
 
 # =====================================================
 # LOOP AUTÔNOMO
@@ -108,21 +111,22 @@ def loop_autonomo():
 
     while True:
         try:
-            oportunidades = buscar_oportunidades()
-            ESTADO["tarefas_avaliadas"] += len(oportunidades)
+            ops = buscar_oportunidades()
+            ESTADO["tarefas_avaliadas"] += len(ops)
 
-            for op in oportunidades:
+            for op in ops:
                 sb.table("tarefas_recebidas").insert(op).execute()
                 ESTADO["tarefas_executadas"] += 1
 
-            ESTADO["ultimo_ciclo"] = datetime.now(timezone.utc).isoformat()
+            ESTADO["ultimo_ciclo"] = now_iso()
         except Exception as e:
             ESTADO["status"] = "ERRO"
             log("LOOP", "ERRO", str(e))
+
         time.sleep(60)
 
 # =====================================================
-# ENDPOINT STATUS
+# STATUS
 # =====================================================
 
 @app.get("/status")
@@ -130,7 +134,23 @@ def status():
     return ESTADO
 
 # =====================================================
-# API MONETIZADA — CONSUMO SOB DEMANDA
+# BILLING — ASSINATURA + PAY PER DATA
+# =====================================================
+
+def registrar_evento_financeiro(origem: str, token: str, quantidade: int, valor_unitario: float):
+    if quantidade <= 0:
+        return
+    sb.table("eventos_financeiros").insert({
+        "origem": origem,
+        "token": token,
+        "quantidade": quantidade,
+        "valor_unitario": valor_unitario,
+        "valor_total": quantidade * valor_unitario,
+        "timestamp": now_iso()
+    }).execute()
+
+# =====================================================
+# API PRIVADA — MONETIZAÇÃO
 # =====================================================
 
 @app.get("/api/oportunidades")
@@ -143,68 +163,66 @@ def api_oportunidades(
 
     token = authorization.replace("Bearer ", "").strip()
 
-    token_row = sb.table("api_tokens").select("*").eq("token", token).eq("ativo", True).single().execute().data
-    if not token_row:
+    tok = sb.table("api_tokens").select("*").eq("token", token).eq("ativo", True).single().execute().data
+    if not tok:
         raise HTTPException(status_code=403, detail="Token inválido")
 
     dados = sb.table("tarefas_recebidas").select("*").limit(limit).execute().data
-    quantidade = len(dados)
+    qtd = len(dados)
 
-    if quantidade > 0:
-        valor_unitario = float(token_row["valor_unitario"])
-        sb.table("eventos_financeiros").insert({
-            "origem": "API",
-            "token": token,
-            "quantidade": quantidade,
-            "valor_unitario": valor_unitario,
-            "valor_total": quantidade * valor_unitario,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }).execute()
+    registrar_evento_financeiro(
+        origem="API",
+        token=token,
+        quantidade=qtd,
+        valor_unitario=float(tok["valor_unitario"])
+    )
 
     return {
-        "meta": {
-            "quantidade": quantidade,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        },
+        "meta": {"quantidade": qtd, "timestamp": now_iso()},
         "dados": dados
     }
 
 # =====================================================
-# FEED MONETIZADO — CONSUMO PERIÓDICO
+# FEED — MONETIZAÇÃO
 # =====================================================
 
 @app.get("/feed/oportunidades/{feed_token}")
 def feed_oportunidades(feed_token: str):
-    token_row = sb.table("feed_tokens").select("*").eq("token", feed_token).eq("ativo", True).single().execute().data
-    if not token_row:
+    tok = sb.table("feed_tokens").select("*").eq("token", feed_token).eq("ativo", True).single().execute().data
+    if not tok:
         raise HTTPException(status_code=403, detail="Token inválido")
 
-    ultimo = token_row.get("ultimo_consumo")
-    query = sb.table("tarefas_recebidas").select("*")
+    ultimo = tok.get("ultimo_consumo")
+    q = sb.table("tarefas_recebidas").select("*")
     if ultimo:
-        query = query.gt("timestamp", ultimo)
+        q = q.gt("timestamp", ultimo)
 
-    dados = query.execute().data
-    quantidade = len(dados)
+    dados = q.execute().data
+    qtd = len(dados)
 
-    if quantidade > 0:
-        valor_unitario = float(token_row["valor_unitario"])
-        sb.table("eventos_financeiros").insert({
-            "origem": "FEED",
-            "token": feed_token,
-            "quantidade": quantidade,
-            "valor_unitario": valor_unitario,
-            "valor_total": quantidade * valor_unitario,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }).execute()
+    registrar_evento_financeiro(
+        origem="FEED",
+        token=feed_token,
+        quantidade=qtd,
+        valor_unitario=float(tok["valor_unitario"])
+    )
 
-        sb.table("feed_tokens").update({
-            "ultimo_consumo": datetime.now(timezone.utc).isoformat()
-        }).eq("token", feed_token).execute()
+    sb.table("feed_tokens").update({"ultimo_consumo": now_iso()}).eq("token", feed_token).execute()
 
+    return {"quantidade": qtd, "dados": dados}
+
+# =====================================================
+# BILLING STATUS (VISÃO HUMANA)
+# =====================================================
+
+@app.get("/billing/status")
+def billing_status():
+    eventos = sb.table("eventos_financeiros").select("*").execute().data
+    total = sum(float(e["valor_total"]) for e in eventos)
     return {
-        "quantidade": quantidade,
-        "dados": dados
+        "eventos": len(eventos),
+        "receita_total": total,
+        "timestamp": now_iso()
     }
 
 # =====================================================
