@@ -1,216 +1,168 @@
 # main.py — versão completa e final
-# ROBO GLOBAL AI — FASE 2
-# Operação financeira real + visual humano
-# Continuidade direta do estado anterior
+# ROBO GLOBAL AI — FASE 2A.3 (EVENTOS AUTÔNOMOS VIA RAPIDAPI)
 
-import os
-import hmac
-import hashlib
-import uuid
-from datetime import datetime
-from typing import Dict, Any, Optional
-
-from fastapi import FastAPI, Request, Header, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from supabase import create_client, Client
-
-# =====================================================
-# CONFIGURAÇÃO GLOBAL
-# =====================================================
-
-APP_NAME = "ROBO GLOBAL AI"
-ENV = os.getenv("ENV", "production")
-
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-
-# 🔒 CORREÇÃO DEFINITIVA — SEM LOOPING DE VARIÁVEIS
-SUPABASE_KEY = (
-    os.getenv("SUPABASE_SERVICE_ROLE")
-    or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-    or os.getenv("SUPABASE_KEY")
-)
-
-HOTMART_SECRET = os.getenv("HOTMART_SECRET", "")
-EDUZZ_SECRET = os.getenv("EDUZZ_SECRET", "")
-KIWIFY_SECRET = os.getenv("KIWIFY_SECRET", "")
-
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise RuntimeError("Supabase não configurado no ambiente")
+from datetime import datetime, timezone
+import os
+import requests
+from supabase import create_client
 
 # =====================================================
 # APP
 # =====================================================
 
-app = FastAPI(title=APP_NAME)
+app = FastAPI(title="ROBO GLOBAL AI", version="2.3.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # dashboard humano
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # =====================================================
-# SUPABASE
+# ENV
 # =====================================================
 
-def get_supabase() -> Client:
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")  # anon key (não service role)
+RAPIDAPI_KEY = os.getenv("RAPIDAPI_KEY")
+RAPIDAPI_HOST = os.getenv("RAPIDAPI_HOST", "jsearch.p.rapidapi.com")
+
+CAPITAL_MAXIMO = float(os.getenv("CAPITAL_MAXIMO", "0"))
+RISCO_MAX_CICLO = float(os.getenv("RISCO_MAX_CICLO", "0"))
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise RuntimeError("SUPABASE_URL ou SUPABASE_KEY não configurados")
+
+if not RAPIDAPI_KEY:
+    raise RuntimeError("RAPIDAPI_KEY não configurada")
+
+sb = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # =====================================================
-# LOG PADRÃO
+# HELPERS
 # =====================================================
 
-def log(origem: str, nivel: str, mensagem: str, extra: Optional[Dict] = None):
-    print({
-        "ts": datetime.utcnow().isoformat(),
-        "origem": origem,
-        "nivel": nivel,
-        "mensagem": mensagem,
-        "extra": extra or {}
-    })
+def agora_utc():
+    return datetime.now(timezone.utc).isoformat()
 
-# =====================================================
-# SEGURANÇA HMAC
-# =====================================================
+def obter_resumo_financeiro():
+    resp = sb.table("eventos_financeiros").select("*").execute()
+    eventos = resp.data or []
 
-def validar_hmac(body: bytes, assinatura: str, secret: str) -> bool:
-    if not secret:
-        return True
-    mac = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(mac, assinatura)
+    total = sum([float(e.get("valor_total", 0)) for e in eventos])
+    quantidade = len(eventos)
+    ultimo = eventos[-1] if eventos else None
 
-# =====================================================
-# NORMALIZAÇÃO FINANCEIRA
-# =====================================================
+    return total, quantidade, ultimo
 
-def normalizar_evento(origem: str, dados: Dict[str, Any]) -> Dict[str, Any]:
-    valor = float(dados.get("valor") or dados.get("price") or dados.get("value") or 0)
-    token = dados.get("token") or dados.get("transaction_id") or str(uuid.uuid4())
-
-    return {
-        "valor_total": valor,
-        "valor_unitario": valor,
+def registrar_evento(valor_total, valor_unitario, token, eu_ia=True, sim=False):
+    sb.table("eventos_financeiros").insert({
+        "valor_total": valor_total,
+        "valor_unitario": valor_unitario,
         "token": token,
-        "criado_em": datetime.utcnow().isoformat(),
-        "eu_ia": True,
-        "sim": True,
-    }
+        "eu_ia": eu_ia,
+        "sim": sim,
+        "criado_em": agora_utc()
+    }).execute()
 
 # =====================================================
-# REGISTRO FINANCEIRO REAL
-# =====================================================
-
-def registrar_evento(evento: Dict[str, Any]):
-    sb = get_supabase()
-    sb.table("eventos_financeiros").insert(evento).execute()
-
-# =====================================================
-# PIPELINE
-# =====================================================
-
-def processar_evento(origem: str, dados: Dict[str, Any]):
-    evento = normalizar_evento(origem, dados)
-    registrar_evento(evento)
-    log("PIPELINE", "INFO", f"Evento financeiro registrado ({origem})", evento)
-    return evento
-
-# =====================================================
-# WEBHOOKS
-# =====================================================
-
-@app.post("/webhook/universal")
-async def webhook_universal(request: Request):
-    body = await request.json()
-    evento = processar_evento("universal", body)
-    return {"ok": True, "evento": evento}
-
-@app.post("/webhook/hotmart")
-async def webhook_hotmart(
-    request: Request,
-    x_hotmart_hmac_sha256: Optional[str] = Header(None),
-):
-    raw = await request.body()
-    if not validar_hmac(raw, x_hotmart_hmac_sha256 or "", HOTMART_SECRET):
-        raise HTTPException(status_code=403)
-    body = await request.json()
-    return processar_evento("hotmart", body)
-
-@app.post("/webhook/eduzz")
-async def webhook_eduzz(
-    request: Request,
-    x_eduzz_signature: Optional[str] = Header(None),
-):
-    raw = await request.body()
-    if not validar_hmac(raw, x_eduzz_signature or "", EDUZZ_SECRET):
-        raise HTTPException(status_code=403)
-    body = await request.json()
-    return processar_evento("eduzz", body)
-
-# =====================================================
-# MÉTRICAS FINANCEIRAS
-# =====================================================
-
-def resumo_financeiro():
-    sb = get_supabase()
-    res = sb.table("eventos_financeiros").select("valor_total").execute()
-    total = sum(r["valor_total"] for r in res.data)
-    qtd = len(res.data)
-    return {
-        "total_recebido": total,
-        "eventos": qtd,
-        "media": total / qtd if qtd else 0
-    }
-
-# =====================================================
-# ENDPOINTS OPERACIONAIS
+# STATUS
 # =====================================================
 
 @app.get("/status")
 def status():
     return {
-        "app": APP_NAME,
-        "env": ENV,
+        "app": "ROBO GLOBAL AI",
+        "env": "production",
         "status": "online",
-        "ts": datetime.utcnow().isoformat()
+        "ts": agora_utc()
     }
-
-@app.get("/capital")
-def capital():
-    return resumo_financeiro()
-
-@app.get("/decisao")
-def decisao():
-    r = resumo_financeiro()
-    return {
-        **r,
-        "decisao": "ESCALAR" if r["media"] > 50 else "MANTER",
-        "ts": datetime.utcnow().isoformat()
-    }
-
-@app.get("/resultado")
-def resultado():
-    return resumo_financeiro()
 
 # =====================================================
-# ENDPOINT FINANCEIRO HUMANO (FASE 2)
+# FINANCEIRO HUMANO
 # =====================================================
 
 @app.get("/financeiro/resumo")
 def financeiro_resumo():
-    sb = get_supabase()
-    res = sb.table("eventos_financeiros") \
-        .select("*") \
-        .order("criado_em", desc=True) \
-        .limit(50) \
-        .execute()
-
-    total = sum(r["valor_total"] for r in res.data)
+    total, quantidade, ultimo = obter_resumo_financeiro()
 
     return {
-        "total_recebido": total,
-        "quantidade_eventos": len(res.data),
-        "ultimos_eventos": res.data,
-        "atualizado_em": datetime.utcnow().isoformat()
+        "total_recebido": round(total, 2),
+        "quantidade_eventos": quantidade,
+        "ultimo_evento": ultimo,
+        "atualizado_em": agora_utc()
+    }
+
+# =====================================================
+# FASE 2A.3 — ENDPOINT OPERACIONAL REAL
+# =====================================================
+
+@app.post("/ciclo/rapidapi")
+def ciclo_rapidapi():
+    total_atual, _, _ = obter_resumo_financeiro()
+
+    # Verificação de capital
+    if total_atual <= -CAPITAL_MAXIMO:
+        raise HTTPException(
+            status_code=403,
+            detail="CAPITAL_MAXIMO atingido. Operação bloqueada."
+        )
+
+    # Custo máximo permitido neste ciclo
+    custo_maximo = RISCO_MAX_CICLO
+
+    # Configuração da chamada real (mínimo viável)
+    url = "https://jsearch.p.rapidapi.com/search"
+    querystring = {
+        "query": "software engineer",
+        "page": "1",
+        "num_pages": "1"
+    }
+
+    headers = {
+        "x-rapidapi-key": RAPIDAPI_KEY,
+        "x-rapidapi-host": RAPIDAPI_HOST
+    }
+
+    # Execução real
+    response = requests.get(url, headers=headers, params=querystring, timeout=15)
+
+    if response.status_code != 200:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro RapidAPI: {response.status_code}"
+        )
+
+    # Custo estimado conservador (proteção)
+    custo_estimado = min(custo_maximo, 1.00) * -1
+
+    registrar_evento(
+        valor_total=custo_estimado,
+        valor_unitario=custo_estimado,
+        token="RAPIDAPI:JSEARCH",
+        eu_ia=True,
+        sim=False
+    )
+
+    return {
+        "status": "executado",
+        "origem": "RAPIDAPI:JSEARCH",
+        "custo_registrado": custo_estimado,
+        "capital_restante_estimado": round(total_atual + custo_estimado, 2),
+        "ts": agora_utc()
+    }
+
+# =====================================================
+# ROOT
+# =====================================================
+
+@app.get("/")
+def root():
+    return {
+        "msg": "ROBO GLOBAL AI ATIVO",
+        "fase": "2A.3 — EVENTOS AUTÔNOMOS VIA RAPIDAPI"
     }
