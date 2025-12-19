@@ -1,5 +1,5 @@
 # main.py — ROBO GLOBAL AI
-# FASE 2.1 • FONTE ATIVA 3 • RAPIDAPI
+# FASE 2.1 • FONTE ATIVA 3 • RAPIDAPI (JSEARCH)
 # AGENTE ECONÔMICO AUTÔNOMO • LOOP ATIVO • RENDER
 
 import os
@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client
 
 # =====================================================
-# CONFIGURAÇÕES BÁSICAS
+# CONFIGURAÇÕES
 # =====================================================
 
 APP_NAME = "ROBO GLOBAL AI"
@@ -67,40 +67,37 @@ def log(origem: str, nivel: str, msg: str):
     }).execute()
 
 # =====================================================
-# FONTE ATIVA — RAPIDAPI
+# FONTE ATIVA — JSEARCH (RAPIDAPI)
 # =====================================================
 
-def buscar_tarefas_rapidapi() -> List[Dict[str, Any]]:
+def buscar_tarefas_jsearch() -> List[Dict[str, Any]]:
+    url = "https://jsearch.p.rapidapi.com/search"
+
     headers = {
         "X-RapidAPI-Key": RAPIDAPI_KEY,
-        "X-RapidAPI-Host": "contextualwebsearch-websearch-v1.p.rapidapi.com",
+        "X-RapidAPI-Host": "jsearch.p.rapidapi.com",
     }
 
     params = {
-        "q": "api task bounty automation",
-        "pageNumber": "1",
-        "pageSize": "5",
-        "autoCorrect": "true",
+        "query": "software automation remote",
+        "page": "1",
+        "num_pages": "1",
     }
 
-    response = requests.get(
-        "https://contextualwebsearch-websearch-v1.p.rapidapi.com/api/Search/WebSearchAPI",
-        headers=headers,
-        params=params,
-        timeout=10,
-    )
+    response = requests.get(url, headers=headers, params=params, timeout=10)
 
     if response.status_code != 200:
         return []
 
-    data = response.json().get("value", [])
+    data = response.json().get("data", [])
     tarefas = []
 
     for item in data:
         tarefas.append({
-            "id_externo": item.get("id"),
-            "titulo": item.get("title"),
-            "descricao": item.get("description"),
+            "id_externo": item.get("job_id"),
+            "titulo": item.get("job_title"),
+            "descricao": item.get("job_description"),
+            "empresa": item.get("employer_name"),
             "valor_estimado": 1.0,
             "timestamp": datetime.utcnow().isoformat(),
         })
@@ -115,13 +112,14 @@ def decidir_execucao(tarefa: Dict[str, Any]) -> bool:
     return tarefa.get("valor_estimado", 0) > 0.5
 
 # =====================================================
-# EXECUTOR (SEGURO)
+# EXECUTOR SEGURO
 # =====================================================
 
 def executar_tarefa(tarefa: Dict[str, Any]):
     sb.table("tarefas_executadas").insert({
         "id_externo": tarefa["id_externo"],
         "titulo": tarefa["titulo"],
+        "empresa": tarefa["empresa"],
         "timestamp": datetime.utcnow().isoformat(),
     }).execute()
 
@@ -130,15 +128,15 @@ def executar_tarefa(tarefa: Dict[str, Any]):
 # =====================================================
 
 async def loop_ativo():
-    log("LOOP", "INFO", "Loop ativo iniciado (RapidAPI)")
+    log("LOOP", "INFO", "Loop ativo iniciado (JSearch)")
     estado["status"] = "OPERANDO"
 
     while True:
         try:
-            tarefas = buscar_tarefas_rapidapi()
+            tarefas = buscar_tarefas_jsearch()
+
             for tarefa in tarefas:
                 estado["tarefas_avaliadas"] += 1
-
                 sb.table("tarefas_recebidas").insert(tarefa).execute()
 
                 if decidir_execucao(tarefa):
@@ -167,7 +165,7 @@ async def startup():
     threading.Thread(target=runner, daemon=True).start()
 
 # =====================================================
-# ENDPOINT STATUS
+# STATUS
 # =====================================================
 
 @app.get("/status")
