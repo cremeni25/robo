@@ -1,6 +1,6 @@
 # main.py — ROBO GLOBAL AI
 # ETAPA 3: INGESTÃO DE EVENTOS (RAW)
-# Implementação robusta via REST (sem SDK instável)
+# Correção definitiva: Content-Profile correto
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -45,8 +45,8 @@ HEADERS = {
     "apikey": SUPABASE_KEY,
     "Authorization": f"Bearer {SUPABASE_KEY}",
     "Content-Type": "application/json",
-    "Prefer": "return=minimal",
-    "Accept-Profile": "robo_global"
+    "Content-Profile": "robo_global",   # 🔥 OBRIGATÓRIO PARA INSERT
+    "Prefer": "return=minimal"
 }
 
 # ======================================================
@@ -93,13 +93,14 @@ async def webhook_raw(plataforma: str, request: Request):
     response = requests.post(
         SUPABASE_REST_ENDPOINT,
         headers=HEADERS,
-        data=json.dumps(data)
+        json=data,
+        timeout=10
     )
 
     if response.status_code not in (200, 201, 204):
         raise HTTPException(
             status_code=500,
-            detail=f"Erro ao gravar evento RAW: {response.text}"
+            detail=f"Erro Supabase REST ({response.status_code}): {response.text}"
         )
 
     return {
