@@ -20,7 +20,7 @@ app = FastAPI(
 )
 
 # ======================================================
-# CORS (dashboard humano no futuro)
+# CORS
 # ======================================================
 app.add_middleware(
     CORSMiddleware,
@@ -42,7 +42,7 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ======================================================
-# HEALTH CHECK
+# HEALTH
 # ======================================================
 @app.get("/health")
 def health():
@@ -72,7 +72,6 @@ async def webhook_raw(plataforma: str, request: Request):
     except Exception:
         raise HTTPException(status_code=400, detail="Payload inválido")
 
-    # Gera hash determinístico do payload
     payload_str = json.dumps(payload, sort_keys=True)
     hash_evento = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
 
@@ -84,7 +83,11 @@ async def webhook_raw(plataforma: str, request: Request):
     }
 
     try:
-        supabase.table("robo_global.eventos_afiliados_raw").insert(data).execute()
+        # 🔥 schema definido corretamente aqui
+        supabase.schema("robo_global") \
+            .table("eventos_afiliados_raw") \
+            .insert(data) \
+            .execute()
     except Exception as e:
         raise HTTPException(
             status_code=500,
