@@ -1,119 +1,133 @@
 # main.py — ROBO GLOBAL AI
-# PRODUÇÃO REAL • FINANCEIRO REAL • STRIPE ATIVO
-# Arquivo ÚNICO • INTEIRO • FINAL
+# Versão correta para DEPLOY OK na Render
+# Correção estrutural: nenhuma variável externa quebra o boot
 
 import os
 import json
-import stripe
 from datetime import datetime
-from fastapi import FastAPI, Request, HTTPException
+
+from fastapi import FastAPI, Request, Header
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-# =====================================================
-# CONFIGURAÇÕES DE AMBIENTE (PRODUÇÃO)
-# =====================================================
-
-STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
-STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
-
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-
-CAPITAL_MAXIMO = float(os.getenv("CAPITAL_MAXIMO", "0"))
-RISCO_MAX_CICLO = float(os.getenv("RISCO_MAX_CICLO", "0"))
-
-if not STRIPE_SECRET_KEY:
-    raise RuntimeError("STRIPE_SECRET_KEY não configurada")
-
-if not STRIPE_WEBHOOK_SECRET:
-    raise RuntimeError("STRIPE_WEBHOOK_SECRET não configurada")
-
-stripe.api_key = STRIPE_SECRET_KEY
+import stripe
+from supabase import create_client
 
 # =====================================================
 # APP
 # =====================================================
 
-app = FastAPI(
-    title="ROBO GLOBAL AI",
-    description="Motor financeiro real baseado em eventos Stripe",
-    version="1.0.0",
-)
+app = FastAPI(title="ROBO GLOBAL AI", version="1.0.0")
+
+# =====================================================
+# CORS
+# =====================================================
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # =====================================================
-# HEALTHCHECK
+# SUPABASE (NÃO QUEBRA BOOT)
+# =====================================================
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_SERVICE_ROLE = os.getenv("SUPABASE_SERVICE_ROLE")
+
+supabase = None
+if SUPABASE_URL and SUPABASE_SERVICE_ROLE:
+    supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE)
+
+# =====================================================
+# STATUS
 # =====================================================
 
 @app.get("/status")
-def status():
+async def status():
     return {
-        "status": "ONLINE",
-        "modo": "PRODUÇÃO",
+        "status": "online",
+        "servico": "robo-global-api-v2",
         "timestamp": datetime.utcnow().isoformat()
     }
 
 # =====================================================
-# WEBHOOK STRIPE — PRODUÇÃO REAL
+# WEBHOOK STRIPE (VALIDAÇÃO SOMENTE AQUI)
 # =====================================================
 
 @app.post("/webhook/stripe")
-async def webhook_stripe(request: Request):
-    payload = await request.body()
-    sig_header = request.headers.get("stripe-signature")
+async def webhook_stripe(
+    request: Request,
+    stripe_signature: str = Header(None)
+):
+    stripe_webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
+    stripe_api_key = os.getenv("STRIPE_API_KEY")
 
-    if not sig_header:
-        raise HTTPException(status_code=400, detail="Assinatura Stripe ausente")
+    if not stripe_webhook_secret or not stripe_api_key:
+        return JSONResponse(
+            status_code=500,
+            content={"erro": "Credenciais Stripe não configuradas"}
+        )
+
+    stripe.api_key = stripe_api_key
+
+    payload = await request.body()
 
     try:
         event = stripe.Webhook.construct_event(
             payload=payload,
-            sig_header=sig_header,
-            secret=STRIPE_WEBHOOK_SECRET
+            sig_header=stripe_signature,
+            secret=stripe_webhook_secret
         )
-    except stripe.error.SignatureVerificationError:
-        raise HTTPException(status_code=400, detail="Assinatura Stripe inválida")
-    except Exception:
-        raise HTTPException(status_code=400, detail="Evento Stripe inválido")
+    except Exception as e:
+        return JSONResponse(
+            status_code=400,
+            content={"erro": "Webhook Stripe inválido", "detalhe": str(e)}
+        )
 
     # =================================================
-    # EVENTO FINANCEIRO REAL
+    # PROCESSAMENTO FINANCEIRO REAL
     # =================================================
 
-    if event["type"] == "payment_intent.succeeded":
-        intent = event["data"]["object"]
+    evento_tipo = event["type"]
+    dados = event["data"]["object"]
 
-        evento_financeiro = {
-            "evento": "PAYMENT_INTENT_SUCCEEDED",
-            "payment_intent_id": intent["id"],
-            "valor": intent["amount_received"] / 100,
-            "moeda": intent["currency"].upper(),
-            "email": intent.get("receipt_email"),
-            "status": intent["status"],
-            "data": datetime.utcnow().isoformat(),
-        }
+    registro = {
+        "origem": "stripe",
+        "evento": evento_tipo,
+        "valor": dados.get("amount", 0) / 100 if dados.get("amount") else 0,
+        "moeda": dados.get("currency"),
+        "payload": event,
+        "criado_em": datetime.utcnow().isoformat()
+    }
 
-        print("💰 EVENTO FINANCEIRO REAL RECEBIDO")
-        print(json.dumps(evento_financeiro, ensure_ascii=False))
-
-        # =================================================
-        # PONTO ÚNICO DE INTEGRAÇÃO DO ROBO
-        # =================================================
-        # Aqui é onde o Robo Global AI:
-        # - Registra no Supabase
-        # - Atualiza capital
-        # - Dispara decisão econômica
-        # Nenhuma simulação ocorre aqui.
-        # =================================================
+    if supabase:
+        supabase.table("eventos_financeiros").insert(registro).execute()
 
     return {"status": "ok"}
 
 # =====================================================
-# FIM DO ARQUIVO
+# FINANCEIRO — RESUMO (PROTEGIDO)
 # =====================================================
+
+@app.get("/financeiro/resumo")
+async def financeiro_resumo(authorization: str = Header(None)):
+    api_key = os.getenv("API_KEY_INTERNA")
+
+    if not api_key or authorization != f"Bearer {api_key}":
+        return JSONResponse(status_code=401, content={"erro": "Unauthorized"})
+
+    if not supabase:
+        return {"total": 0, "mensagem": "Supabase não configurado"}
+
+    dados = supabase.table("eventos_financeiros").select("valor").execute()
+
+    total = sum(item["valor"] for item in dados.data) if dados.data else 0
+
+    return {
+        "total_recebido": total,
+        "eventos": len(dados.data)
+    }
