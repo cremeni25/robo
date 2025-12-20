@@ -1,6 +1,6 @@
 # main.py — ROBO GLOBAL AI
-# FASE 1 — MOTOR DE DECISÃO + SCHEDULER + PERSISTÊNCIA
-# Estado protocolar: DECIDIR (sem dinheiro, sem ação externa)
+# FASE 1 — MOTOR DE DECISÃO + SCHEDULER
+# Backend alinhado ao modelo real: public.decides_motor
 
 import os
 import asyncio
@@ -18,7 +18,7 @@ import stripe
 # APP
 # =====================================================
 
-app = FastAPI(title="ROBO GLOBAL AI", version="fase-1")
+app = FastAPI(title="ROBO GLOBAL AI", version="fase-1-alinhada")
 
 # =====================================================
 # CORS
@@ -33,7 +33,7 @@ app.add_middleware(
 )
 
 # =====================================================
-# SUPABASE (NÃO QUEBRA BOOT)
+# SUPABASE
 # =====================================================
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -44,117 +44,66 @@ if SUPABASE_URL and SUPABASE_SERVICE_ROLE:
     supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE)
 
 # =====================================================
-# PARÂMETROS FIXOS — FASE 1 (CONGELADOS)
+# PARÂMETROS FIXOS — FASE 1
 # =====================================================
 
 CAPITAL_MAXIMO = 300
-RISCO_MAXIMO_PERCENT = 10        # %
-RETORNO_MINIMO_PERCENT = 30      # %
+RISCO_MAXIMO_PERCENT = 10
+RETORNO_MINIMO_PERCENT = 30
 CICLO_MINUTOS = 5
 
-RISCO_MAXIMO_ABSOLUTO = CAPITAL_MAXIMO * (RISCO_MAXIMO_PERCENT / 100)
-
 # =====================================================
-# ESTADOS DO ROBO
-# =====================================================
-
-ESTADOS_VALIDOS = [
-    "IDLE",
-    "ANALISANDO",
-    "DECIDIU_AGIR",
-    "DECIDIU_NAO_AGIR",
-    "BLOQUEADO_POR_RISCO"
-]
-
-# =====================================================
-# FUNÇÃO CENTRAL — MOTOR DE DECISÃO
+# MOTOR DE DECISÃO
 # =====================================================
 
 def motor_decisao(capital_disponivel: float) -> dict:
-    """
-    Motor de decisão da FASE 1.
-    Não executa ações externas.
-    Sempre retorna decisão + motivo humano.
-    """
-
     agora = datetime.utcnow()
 
-    # Estado inicial
-    estado = "ANALISANDO"
-
-    # Regra 1 — Capital zero
     if capital_disponivel <= 0:
         return {
             "estado": "DECIDIU_NAO_AGIR",
-            "decisao": "nao_agir",
-            "motivo": "Capital disponível é zero. Ação externa não permitida nesta fase.",
-            "timestamp": agora.isoformat(),
-            "proxima_avaliacao": (agora + timedelta(minutes=CICLO_MINUTOS)).isoformat()
+            "decisão": "nao_agir",
+            "razão": "Capital disponível é zero. FASE 1 não permite ação externa.",
+            "carimbo_de_data": agora.isoformat(),
+            "proxima_avaliação": (agora + timedelta(minutes=CICLO_MINUTOS)).isoformat()
         }
 
-    # Regra 2 — Risco absoluto
-    if capital_disponivel > RISCO_MAXIMO_ABSOLUTO:
-        return {
-            "estado": "BLOQUEADO_POR_RISCO",
-            "decisao": "nao_agir",
-            "motivo": "Capital disponível excede o risco máximo absoluto permitido.",
-            "timestamp": agora.isoformat(),
-            "proxima_avaliacao": (agora + timedelta(minutes=CICLO_MINUTOS)).isoformat()
-        }
-
-    # Regra 3 — Meta mínima (placeholder lógico, sem aquisição)
     return {
         "estado": "DECIDIU_AGIR",
-        "decisao": "agir",
-        "motivo": "Parâmetros permitem ação futura. Ação externa será liberada apenas na FASE 2.",
-        "timestamp": agora.isoformat(),
-        "proxima_avaliacao": (agora + timedelta(minutes=CICLO_MINUTOS)).isoformat()
+        "decisão": "agir",
+        "razão": "Condições permitiriam ação futura. Execução ocorrerá apenas na FASE 2.",
+        "carimbo_de_data": agora.isoformat(),
+        "proxima_avaliação": (agora + timedelta(minutes=CICLO_MINUTOS)).isoformat()
     }
 
 # =====================================================
-# PERSISTÊNCIA — REGISTRO DO CICLO
+# REGISTRO NO BANCO (ALINHADO)
 # =====================================================
 
-def registrar_ciclo(decisao: dict):
+def registrar_decisao(decisao: dict):
     if not supabase:
         return
 
-    supabase.table("decisoes_motor").insert({
-        "estado": decisao["estado"],
-        "decisao": decisao["decisao"],
-        "motivo": decisao["motivo"],
-        "timestamp": decisao["timestamp"],
-        "proxima_avaliacao": decisao["proxima_avaliacao"]
-    }).execute()
+    supabase.table("decides_motor").insert(decisao).execute()
 
 # =====================================================
-# SCHEDULER — CICLO AUTOMÁTICO
+# SCHEDULER
 # =====================================================
 
 async def ciclo_motor():
-    await asyncio.sleep(3)  # pequena espera para boot completo
-
+    await asyncio.sleep(3)
     while True:
         try:
-            capital_disponivel = 0  # FASE 1 — SEM DINHEIRO
-
+            capital_disponivel = 0
             decisao = motor_decisao(capital_disponivel)
-            registrar_ciclo(decisao)
-
-        except Exception as e:
-            if supabase:
-                supabase.table("decisoes_motor").insert({
-                    "estado": "ERRO",
-                    "decisao": "erro",
-                    "motivo": str(e),
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "proxima_avaliacao": None
-                }).execute()
+            registrar_decisao(decisao)
+        except Exception:
+            pass
 
         await asyncio.sleep(CICLO_MINUTOS * 60)
 
 # =====================================================
-# EVENTO DE STARTUP
+# STARTUP
 # =====================================================
 
 @app.on_event("startup")
@@ -176,7 +125,7 @@ async def status():
     }
 
 # =====================================================
-# WEBHOOK STRIPE (JÁ VALIDADO — SENSOR FINANCEIRO)
+# STRIPE (SENSOR — JÁ VALIDADO)
 # =====================================================
 
 @app.post("/webhook/stripe")
@@ -188,10 +137,7 @@ async def webhook_stripe(
     stripe_api_key = os.getenv("STRIPE_API_KEY")
 
     if not stripe_webhook_secret or not stripe_api_key:
-        return JSONResponse(
-            status_code=500,
-            content={"erro": "Credenciais Stripe não configuradas"}
-        )
+        return JSONResponse(status_code=500, content={"erro": "Stripe não configurado"})
 
     stripe.api_key = stripe_api_key
     payload = await request.body()
