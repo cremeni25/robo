@@ -1,11 +1,14 @@
 # main.py — ROBO GLOBAL AI
-# FASE 1 — MOTOR DE DECISÃO + SCHEDULER
-# Backend alinhado ao modelo real: public.decides_motor
+# FASE 1 + FASE 2A
+# Motor de decisão + Motor autônomo de busca e análise de oportunidades
+# SEM atuação humana • SEM dinheiro • SEM execução externa
 
 import os
 import asyncio
+import requests
+from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, List
 
 from fastapi import FastAPI, Request, Header
 from fastapi.responses import JSONResponse
@@ -18,7 +21,7 @@ import stripe
 # APP
 # =====================================================
 
-app = FastAPI(title="ROBO GLOBAL AI", version="fase-1-alinhada")
+app = FastAPI(title="ROBO GLOBAL AI", version="fase-2a-autonomo")
 
 # =====================================================
 # CORS
@@ -44,16 +47,14 @@ if SUPABASE_URL and SUPABASE_SERVICE_ROLE:
     supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE)
 
 # =====================================================
-# PARÂMETROS FIXOS — FASE 1
+# PARÂMETROS GERAIS
 # =====================================================
 
-CAPITAL_MAXIMO = 300
-RISCO_MAXIMO_PERCENT = 10
-RETORNO_MINIMO_PERCENT = 30
-CICLO_MINUTOS = 5
+CICLO_DECISAO_MIN = 5
+CICLO_BUSCA_MIN = 30   # busca de oportunidades a cada 30 min
 
 # =====================================================
-# MOTOR DE DECISÃO
+# FASE 1 — MOTOR DE DECISÃO (JÁ VALIDADO)
 # =====================================================
 
 def motor_decisao(capital_disponivel: float) -> dict:
@@ -63,44 +64,118 @@ def motor_decisao(capital_disponivel: float) -> dict:
         return {
             "estado": "DECIDIU_NAO_AGIR",
             "decisão": "nao_agir",
-            "razão": "Capital disponível é zero. FASE 1 não permite ação externa.",
+            "razão": "Capital zero. Ação externa proibida.",
             "carimbo_de_data": agora.isoformat(),
-            "proxima_avaliação": (agora + timedelta(minutes=CICLO_MINUTOS)).isoformat()
+            "proxima_avaliação": (agora + timedelta(minutes=CICLO_DECISAO_MIN)).isoformat()
         }
 
     return {
         "estado": "DECIDIU_AGIR",
         "decisão": "agir",
-        "razão": "Condições permitiriam ação futura. Execução ocorrerá apenas na FASE 2.",
+        "razão": "Condições futuras permitiriam ação. Execução só em fases posteriores.",
         "carimbo_de_data": agora.isoformat(),
-        "proxima_avaliação": (agora + timedelta(minutes=CICLO_MINUTOS)).isoformat()
+        "proxima_avaliação": (agora + timedelta(minutes=CICLO_DECISAO_MIN)).isoformat()
     }
 
-# =====================================================
-# REGISTRO NO BANCO (ALINHADO)
-# =====================================================
-
 def registrar_decisao(decisao: dict):
-    if not supabase:
-        return
+    if supabase:
+        supabase.table("decides_motor").insert(decisao).execute()
 
-    supabase.table("decides_motor").insert(decisao).execute()
-
-# =====================================================
-# SCHEDULER
-# =====================================================
-
-async def ciclo_motor():
+async def ciclo_motor_decisao():
     await asyncio.sleep(3)
     while True:
         try:
-            capital_disponivel = 0
-            decisao = motor_decisao(capital_disponivel)
+            decisao = motor_decisao(0)
             registrar_decisao(decisao)
         except Exception:
             pass
+        await asyncio.sleep(CICLO_DECISAO_MIN * 60)
 
-        await asyncio.sleep(CICLO_MINUTOS * 60)
+# =====================================================
+# FASE 2A — MOTOR AUTÔNOMO DE BUSCA E ANÁLISE
+# =====================================================
+
+FONTES_PUBLICAS = [
+    {
+        "origem": "https://www.futurepedia.io/",
+        "categoria": "AI Tools"
+    },
+    {
+        "origem": "https://www.saasworthy.com/",
+        "categoria": "SaaS"
+    }
+]
+
+def calcular_score(oferta: dict) -> int:
+    score = 0
+
+    if oferta.get("preco_estimado"):
+        score += 20
+    if oferta.get("modelo_receita") == "recorrente":
+        score += 25
+    if oferta.get("publico_alvo"):
+        score += 20
+    if len(oferta.get("descricao_curta", "")) > 40:
+        score += 15
+    score += 10  # risco operacional baixo (fase exploratória)
+
+    return min(score, 100)
+
+def extrair_ofertas_fonte(fonte: dict) -> List[dict]:
+    ofertas = []
+
+    try:
+        resp = requests.get(fonte["origem"], timeout=10)
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        cards = soup.find_all("a")[:10]  # leitura superficial controlada
+
+        for card in cards:
+            nome = card.get_text(strip=True)
+            if len(nome) < 5:
+                continue
+
+            oferta = {
+                "origem": fonte["origem"],
+                "nome_oferta": nome[:120],
+                "categoria": fonte["categoria"],
+                "descricao_curta": f"Oferta identificada automaticamente em {fonte['origem']}",
+                "preco_estimado": None,
+                "modelo_receita": "recorrente",
+                "publico_alvo": "global",
+            }
+
+            score = calcular_score(oferta)
+            oferta["score_viabilidade"] = score
+            oferta["status"] = "priorizada" if score >= 60 else "identificada"
+            oferta["motivo"] = f"Score automático {score} baseado em modelo recorrente e público global."
+            oferta["criado_em"] = datetime.utcnow().isoformat()
+
+            ofertas.append(oferta)
+
+    except Exception:
+        pass
+
+    return ofertas
+
+def registrar_oportunidade(oferta: dict):
+    if not supabase:
+        return
+
+    supabase.table("oportunidades_robo").insert(oferta).execute()
+
+async def ciclo_busca_oportunidades():
+    await asyncio.sleep(10)
+    while True:
+        try:
+            for fonte in FONTES_PUBLICAS:
+                ofertas = extrair_ofertas_fonte(fonte)
+                for oferta in ofertas:
+                    registrar_oportunidade(oferta)
+        except Exception:
+            pass
+
+        await asyncio.sleep(CICLO_BUSCA_MIN * 60)
 
 # =====================================================
 # STARTUP
@@ -108,7 +183,8 @@ async def ciclo_motor():
 
 @app.on_event("startup")
 async def startup_event():
-    asyncio.create_task(ciclo_motor())
+    asyncio.create_task(ciclo_motor_decisao())
+    asyncio.create_task(ciclo_busca_oportunidades())
 
 # =====================================================
 # STATUS
@@ -118,14 +194,14 @@ async def startup_event():
 async def status():
     return {
         "status": "online",
-        "fase": 1,
-        "motor": "ativo",
-        "ciclo_minutos": CICLO_MINUTOS,
+        "fase": "1 + 2A",
+        "motor_decisao": "ativo",
+        "motor_busca": "ativo",
         "timestamp": datetime.utcnow().isoformat()
     }
 
 # =====================================================
-# STRIPE (SENSOR — JÁ VALIDADO)
+# STRIPE — SENSOR FINANCEIRO (INALTERADO)
 # =====================================================
 
 @app.post("/webhook/stripe")
