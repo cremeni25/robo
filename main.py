@@ -1,31 +1,19 @@
 # main.py — ROBO GLOBAL AI
-# FASE 1 + FASE 2A
-# Motor de decisão + Motor autônomo de busca e análise de oportunidades
-# SEM atuação humana • SEM dinheiro • SEM execução externa
+# FASE 1 — WEBHOOKS + REGISTRO FINANCEIRO (AFILIADOS)
+# PROPÓSITO ÚNICO: captar e registrar eventos reais de afiliados
 
-import os
-import asyncio
-import requests
-from bs4 import BeautifulSoup
-from datetime import datetime, timedelta
-from typing import Optional, List
-
-from fastapi import FastAPI, Request, Header
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-
-from supabase import create_client
-import stripe
+from datetime import datetime
+import os
+import json
+from supabase import create_client, Client
 
 # =====================================================
 # APP
 # =====================================================
 
-app = FastAPI(title="ROBO GLOBAL AI", version="fase-2a-autonomo")
-
-# =====================================================
-# CORS
-# =====================================================
+app = FastAPI(title="Robo Global AI — Fase 1")
 
 app.add_middleware(
     CORSMiddleware,
@@ -40,201 +28,135 @@ app.add_middleware(
 # =====================================================
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_SERVICE_ROLE = os.getenv("SUPABASE_SERVICE_ROLE")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
-supabase = None
-if SUPABASE_URL and SUPABASE_SERVICE_ROLE:
-    supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE)
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise RuntimeError("SUPABASE não configurado corretamente")
 
-# =====================================================
-# PARÂMETROS GERAIS
-# =====================================================
-
-CICLO_DECISAO_MIN = 5
-CICLO_BUSCA_MIN = 30   # busca de oportunidades a cada 30 min
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # =====================================================
-# FASE 1 — MOTOR DE DECISÃO (JÁ VALIDADO)
+# UTILITÁRIOS
 # =====================================================
 
-def motor_decisao(capital_disponivel: float) -> dict:
-    agora = datetime.utcnow()
+def log_humano(origem: str, mensagem: str):
+    print(f"[{origem.upper()}] {mensagem}")
 
-    if capital_disponivel <= 0:
+def registrar_evento(evento: dict, origem: str):
+    resposta = supabase.table("eventos_financeiros").insert(evento).execute()
+    if not resposta.data:
+        log_humano(origem, "ERRO — falha ao registrar evento no Supabase")
+        raise HTTPException(status_code=500, detail="Falha ao registrar evento")
+    log_humano(origem, f"EVENTO REGISTRADO — {evento['evento']} — {evento['valor_comissao']} {evento['moeda']}")
+
+def validar_campos(evento: dict, campos: list, origem: str):
+    for campo in campos:
+        if campo not in evento or evento[campo] in [None, ""]:
+            log_humano(origem, f"ERRO — campo ausente: {campo}")
+            raise HTTPException(status_code=400, detail=f"Campo ausente: {campo}")
+
+# =====================================================
+# NORMALIZAÇÃO
+# =====================================================
+
+def normalizar_evento(plataforma: str, payload: dict) -> dict:
+    agora = datetime.utcnow().isoformat()
+
+    if plataforma == "hotmart":
         return {
-            "estado": "DECIDIU_NAO_AGIR",
-            "decisão": "nao_agir",
-            "razão": "Capital zero. Ação externa proibida.",
-            "carimbo_de_data": agora.isoformat(),
-            "proxima_avaliação": (agora + timedelta(minutes=CICLO_DECISAO_MIN)).isoformat()
+            "plataforma_origem": "hotmart",
+            "evento": payload.get("event"),
+            "produto_id": payload.get("product", {}).get("id"),
+            "afiliado_id": payload.get("affiliate", {}).get("id"),
+            "valor_bruto": payload.get("purchase", {}).get("price", {}).get("value"),
+            "valor_comissao": payload.get("commission", {}).get("value"),
+            "moeda": payload.get("purchase", {}).get("price", {}).get("currency"),
+            "status_financeiro": payload.get("status"),
+            "timestamp_evento": payload.get("purchase", {}).get("date") or agora,
+            "payload_original": payload,
         }
 
-    return {
-        "estado": "DECIDIU_AGIR",
-        "decisão": "agir",
-        "razão": "Condições futuras permitiriam ação. Execução só em fases posteriores.",
-        "carimbo_de_data": agora.isoformat(),
-        "proxima_avaliação": (agora + timedelta(minutes=CICLO_DECISAO_MIN)).isoformat()
-    }
+    if plataforma == "eduzz":
+        return {
+            "plataforma_origem": "eduzz",
+            "evento": payload.get("event"),
+            "produto_id": payload.get("product_id"),
+            "afiliado_id": payload.get("affiliate_id"),
+            "valor_bruto": payload.get("sale_amount"),
+            "valor_comissao": payload.get("commission_amount"),
+            "moeda": payload.get("currency", "BRL"),
+            "status_financeiro": payload.get("sale_status"),
+            "timestamp_evento": payload.get("created_at") or agora,
+            "payload_original": payload,
+        }
 
-def registrar_decisao(decisao: dict):
-    if supabase:
-        supabase.table("decides_motor").insert(decisao).execute()
+    if plataforma == "stripe":
+        data = payload.get("data", {}).get("object", {})
+        return {
+            "plataforma_origem": "stripe",
+            "evento": payload.get("type"),
+            "produto_id": data.get("metadata", {}).get("product_id"),
+            "afiliado_id": data.get("metadata", {}).get("affiliate_id"),
+            "valor_bruto": (data.get("amount", 0) or 0) / 100,
+            "valor_comissao": (data.get("metadata", {}).get("commission_amount") or 0),
+            "moeda": data.get("currency", "").upper(),
+            "status_financeiro": data.get("status"),
+            "timestamp_evento": datetime.utcfromtimestamp(data.get("created", 0)).isoformat() if data.get("created") else agora,
+            "payload_original": payload,
+        }
 
-async def ciclo_motor_decisao():
-    await asyncio.sleep(3)
-    while True:
-        try:
-            decisao = motor_decisao(0)
-            registrar_decisao(decisao)
-        except Exception:
-            pass
-        await asyncio.sleep(CICLO_DECISAO_MIN * 60)
+    raise HTTPException(status_code=400, detail="Plataforma não suportada")
 
 # =====================================================
-# FASE 2A — MOTOR AUTÔNOMO DE BUSCA E ANÁLISE
+# WEBHOOKS
 # =====================================================
 
-FONTES_PUBLICAS = [
-    {
-        "origem": "https://www.futurepedia.io/",
-        "categoria": "AI Tools"
-    },
-    {
-        "origem": "https://www.saasworthy.com/",
-        "categoria": "SaaS"
-    }
+CAMPOS_OBRIGATORIOS = [
+    "plataforma_origem",
+    "evento",
+    "produto_id",
+    "afiliado_id",
+    "valor_bruto",
+    "valor_comissao",
+    "moeda",
+    "status_financeiro",
+    "timestamp_evento",
+    "payload_original",
 ]
 
-def calcular_score(oferta: dict) -> int:
-    score = 0
+@app.post("/webhook/hotmart")
+async def webhook_hotmart(request: Request):
+    payload = await request.json()
+    evento = normalizar_evento("hotmart", payload)
+    validar_campos(evento, CAMPOS_OBRIGATORIOS, "HOTMART")
+    registrar_evento(evento, "HOTMART")
+    return {"status": "ok"}
 
-    if oferta.get("preco_estimado"):
-        score += 20
-    if oferta.get("modelo_receita") == "recorrente":
-        score += 25
-    if oferta.get("publico_alvo"):
-        score += 20
-    if len(oferta.get("descricao_curta", "")) > 40:
-        score += 15
-    score += 10  # risco operacional baixo (fase exploratória)
+@app.post("/webhook/eduzz")
+async def webhook_eduzz(request: Request):
+    payload = await request.json()
+    evento = normalizar_evento("eduzz", payload)
+    validar_campos(evento, CAMPOS_OBRIGATORIOS, "EDUZZ")
+    registrar_evento(evento, "EDUZZ")
+    return {"status": "ok"}
 
-    return min(score, 100)
-
-def extrair_ofertas_fonte(fonte: dict) -> List[dict]:
-    ofertas = []
-
-    try:
-        resp = requests.get(fonte["origem"], timeout=10)
-        soup = BeautifulSoup(resp.text, "html.parser")
-
-        cards = soup.find_all("a")[:10]  # leitura superficial controlada
-
-        for card in cards:
-            nome = card.get_text(strip=True)
-            if len(nome) < 5:
-                continue
-
-            oferta = {
-                "origem": fonte["origem"],
-                "nome_oferta": nome[:120],
-                "categoria": fonte["categoria"],
-                "descricao_curta": f"Oferta identificada automaticamente em {fonte['origem']}",
-                "preco_estimado": None,
-                "modelo_receita": "recorrente",
-                "publico_alvo": "global",
-            }
-
-            score = calcular_score(oferta)
-            oferta["score_viabilidade"] = score
-            oferta["status"] = "priorizada" if score >= 60 else "identificada"
-            oferta["motivo"] = f"Score automático {score} baseado em modelo recorrente e público global."
-            oferta["criado_em"] = datetime.utcnow().isoformat()
-
-            ofertas.append(oferta)
-
-    except Exception:
-        pass
-
-    return ofertas
-
-def registrar_oportunidade(oferta: dict):
-    if not supabase:
-        return
-
-    supabase.table("oportunidades_robo").insert(oferta).execute()
-
-async def ciclo_busca_oportunidades():
-    await asyncio.sleep(10)
-    while True:
-        try:
-            for fonte in FONTES_PUBLICAS:
-                ofertas = extrair_ofertas_fonte(fonte)
-                for oferta in ofertas:
-                    registrar_oportunidade(oferta)
-        except Exception:
-            pass
-
-        await asyncio.sleep(CICLO_BUSCA_MIN * 60)
-
-# =====================================================
-# STARTUP
-# =====================================================
-
-@app.on_event("startup")
-async def startup_event():
-    asyncio.create_task(ciclo_motor_decisao())
-    asyncio.create_task(ciclo_busca_oportunidades())
+@app.post("/webhook/stripe")
+async def webhook_stripe(request: Request):
+    payload = await request.json()
+    evento = normalizar_evento("stripe", payload)
+    validar_campos(evento, CAMPOS_OBRIGATORIOS, "STRIPE")
+    registrar_evento(evento, "STRIPE")
+    return {"status": "ok"}
 
 # =====================================================
 # STATUS
 # =====================================================
 
 @app.get("/status")
-async def status():
+def status():
     return {
-        "status": "online",
-        "fase": "1 + 2A",
-        "motor_decisao": "ativo",
-        "motor_busca": "ativo",
-        "timestamp": datetime.utcnow().isoformat()
+        "robo": "Robo Global AI",
+        "fase": "FASE 1 — Webhooks + Registro",
+        "status": "ativo",
+        "timestamp": datetime.utcnow().isoformat(),
     }
-
-# =====================================================
-# STRIPE — SENSOR FINANCEIRO (INALTERADO)
-# =====================================================
-
-@app.post("/webhook/stripe")
-async def webhook_stripe(
-    request: Request,
-    stripe_signature: Optional[str] = Header(None)
-):
-    stripe_webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
-    stripe_api_key = os.getenv("STRIPE_API_KEY")
-
-    if not stripe_webhook_secret or not stripe_api_key:
-        return JSONResponse(status_code=500, content={"erro": "Stripe não configurado"})
-
-    stripe.api_key = stripe_api_key
-    payload = await request.body()
-
-    try:
-        event = stripe.Webhook.construct_event(
-            payload=payload,
-            sig_header=stripe_signature,
-            secret=stripe_webhook_secret
-        )
-    except Exception as e:
-        return JSONResponse(status_code=400, content={"erro": str(e)})
-
-    if supabase:
-        supabase.table("eventos_financeiros").insert({
-            "origem": "stripe",
-            "evento": event["type"],
-            "valor": event["data"]["object"].get("amount", 0) / 100,
-            "moeda": event["data"]["object"].get("currency"),
-            "payload": event,
-            "criado_em": datetime.utcnow().isoformat()
-        }).execute()
-
-    return {"status": "ok"}
