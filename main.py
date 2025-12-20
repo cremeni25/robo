@@ -1,6 +1,7 @@
 # main.py — ROBO GLOBAL AI
 # FASE 1 — WEBHOOKS + REGISTRO FINANCEIRO (AFILIADOS)
 # PROPÓSITO ÚNICO: captar e registrar eventos reais de afiliados
+# AJUSTADO AO SCHEMA REAL (sem evento, sem afiliado_id)
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -54,7 +55,7 @@ def registrar_evento(evento: dict, origem: str):
         raise HTTPException(status_code=500, detail="Falha ao registrar evento")
     log_humano(
         origem,
-        f"EVENTO REGISTRADO — {evento['evento']} — {evento['valor_comissao']} {evento['moeda']}",
+        f"EVENTO FINANCEIRO REGISTRADO — {evento['valor_comissao']} {evento['moeda']}",
     )
 
 # =====================================================
@@ -67,7 +68,6 @@ def normalizar_evento(plataforma: str, payload: dict) -> dict:
     if plataforma == "hotmart":
         return {
             "plataforma_origem": "hotmart",
-            "evento": payload.get("event"),
             "produto_id": payload.get("product", {}).get("id"),
             "valor_bruto": payload.get("purchase", {}).get("price", {}).get("value"),
             "valor_comissao": payload.get("commission", {}).get("value"),
@@ -80,7 +80,6 @@ def normalizar_evento(plataforma: str, payload: dict) -> dict:
     if plataforma == "eduzz":
         return {
             "plataforma_origem": "eduzz",
-            "evento": payload.get("event"),
             "produto_id": payload.get("product_id"),
             "valor_bruto": payload.get("sale_amount"),
             "valor_comissao": payload.get("commission_amount"),
@@ -94,15 +93,16 @@ def normalizar_evento(plataforma: str, payload: dict) -> dict:
         data = payload.get("data", {}).get("object", {})
         return {
             "plataforma_origem": "stripe",
-            "evento": payload.get("type"),
             "produto_id": data.get("metadata", {}).get("product_id"),
             "valor_bruto": (data.get("amount", 0) or 0) / 100,
             "valor_comissao": float(data.get("metadata", {}).get("commission_amount") or 0),
             "moeda": data.get("currency", "").upper(),
             "status_financeiro": data.get("status"),
-            "timestamp_evento": datetime.utcfromtimestamp(data.get("created", 0)).isoformat()
-            if data.get("created")
-            else agora,
+            "timestamp_evento": (
+                datetime.utcfromtimestamp(data.get("created", 0)).isoformat()
+                if data.get("created")
+                else agora
+            ),
             "payload_original": payload,
         }
 
@@ -114,7 +114,6 @@ def normalizar_evento(plataforma: str, payload: dict) -> dict:
 
 CAMPOS_OBRIGATORIOS = [
     "plataforma_origem",
-    "evento",
     "produto_id",
     "valor_bruto",
     "valor_comissao",
