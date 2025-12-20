@@ -6,7 +6,6 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
 import os
-import json
 from supabase import create_client, Client
 
 # =====================================================
@@ -42,18 +41,21 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 def log_humano(origem: str, mensagem: str):
     print(f"[{origem.upper()}] {mensagem}")
 
-def registrar_evento(evento: dict, origem: str):
-    resposta = supabase.table("eventos_financeiros").insert(evento).execute()
-    if not resposta.data:
-        log_humano(origem, "ERRO — falha ao registrar evento no Supabase")
-        raise HTTPException(status_code=500, detail="Falha ao registrar evento")
-    log_humano(origem, f"EVENTO REGISTRADO — {evento['evento']} — {evento['valor_comissao']} {evento['moeda']}")
-
 def validar_campos(evento: dict, campos: list, origem: str):
     for campo in campos:
         if campo not in evento or evento[campo] in [None, ""]:
             log_humano(origem, f"ERRO — campo ausente: {campo}")
             raise HTTPException(status_code=400, detail=f"Campo ausente: {campo}")
+
+def registrar_evento(evento: dict, origem: str):
+    resposta = supabase.table("eventos_financeiros").insert(evento).execute()
+    if not resposta.data:
+        log_humano(origem, "ERRO — falha ao registrar evento no Supabase")
+        raise HTTPException(status_code=500, detail="Falha ao registrar evento")
+    log_humano(
+        origem,
+        f"EVENTO REGISTRADO — {evento['evento']} — {evento['valor_comissao']} {evento['moeda']}",
+    )
 
 # =====================================================
 # NORMALIZAÇÃO
@@ -67,7 +69,6 @@ def normalizar_evento(plataforma: str, payload: dict) -> dict:
             "plataforma_origem": "hotmart",
             "evento": payload.get("event"),
             "produto_id": payload.get("product", {}).get("id"),
-            "afiliado_id": payload.get("affiliate", {}).get("id"),
             "valor_bruto": payload.get("purchase", {}).get("price", {}).get("value"),
             "valor_comissao": payload.get("commission", {}).get("value"),
             "moeda": payload.get("purchase", {}).get("price", {}).get("currency"),
@@ -81,7 +82,6 @@ def normalizar_evento(plataforma: str, payload: dict) -> dict:
             "plataforma_origem": "eduzz",
             "evento": payload.get("event"),
             "produto_id": payload.get("product_id"),
-            "afiliado_id": payload.get("affiliate_id"),
             "valor_bruto": payload.get("sale_amount"),
             "valor_comissao": payload.get("commission_amount"),
             "moeda": payload.get("currency", "BRL"),
@@ -96,12 +96,13 @@ def normalizar_evento(plataforma: str, payload: dict) -> dict:
             "plataforma_origem": "stripe",
             "evento": payload.get("type"),
             "produto_id": data.get("metadata", {}).get("product_id"),
-            "afiliado_id": data.get("metadata", {}).get("affiliate_id"),
             "valor_bruto": (data.get("amount", 0) or 0) / 100,
-            "valor_comissao": (data.get("metadata", {}).get("commission_amount") or 0),
+            "valor_comissao": float(data.get("metadata", {}).get("commission_amount") or 0),
             "moeda": data.get("currency", "").upper(),
             "status_financeiro": data.get("status"),
-            "timestamp_evento": datetime.utcfromtimestamp(data.get("created", 0)).isoformat() if data.get("created") else agora,
+            "timestamp_evento": datetime.utcfromtimestamp(data.get("created", 0)).isoformat()
+            if data.get("created")
+            else agora,
             "payload_original": payload,
         }
 
@@ -115,7 +116,6 @@ CAMPOS_OBRIGATORIOS = [
     "plataforma_origem",
     "evento",
     "produto_id",
-    "afiliado_id",
     "valor_bruto",
     "valor_comissao",
     "moeda",
