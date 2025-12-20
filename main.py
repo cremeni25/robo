@@ -1,6 +1,6 @@
 # main.py — ROBO GLOBAL AI
 # ETAPA 3: INGESTÃO DE EVENTOS (RAW)
-# Substituição integral do arquivo (protocolo respeitado)
+# Implementação robusta via REST (sem SDK instável)
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,7 +8,7 @@ from datetime import datetime
 import hashlib
 import json
 import os
-from supabase import create_client
+import requests
 
 # ======================================================
 # APP
@@ -31,7 +31,7 @@ app.add_middleware(
 )
 
 # ======================================================
-# SUPABASE
+# SUPABASE (REST)
 # ======================================================
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
@@ -39,7 +39,15 @@ SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 if not SUPABASE_URL or not SUPABASE_KEY:
     raise RuntimeError("Supabase não configurado (env vars ausentes)")
 
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+SUPABASE_REST_ENDPOINT = f"{SUPABASE_URL}/rest/v1/eventos_afiliados_raw"
+
+HEADERS = {
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "Content-Type": "application/json",
+    "Prefer": "return=minimal",
+    "Accept-Profile": "robo_global"
+}
 
 # ======================================================
 # HEALTH
@@ -82,16 +90,16 @@ async def webhook_raw(plataforma: str, request: Request):
         "data_recebimento": datetime.utcnow().isoformat()
     }
 
-    try:
-        # 🔥 schema definido corretamente aqui
-        supabase.schema("robo_global") \
-            .table("eventos_afiliados_raw") \
-            .insert(data) \
-            .execute()
-    except Exception as e:
+    response = requests.post(
+        SUPABASE_REST_ENDPOINT,
+        headers=HEADERS,
+        data=json.dumps(data)
+    )
+
+    if response.status_code not in (200, 201, 204):
         raise HTTPException(
             status_code=500,
-            detail=f"Erro ao gravar evento RAW: {str(e)}"
+            detail=f"Erro ao gravar evento RAW: {response.text}"
         )
 
     return {
