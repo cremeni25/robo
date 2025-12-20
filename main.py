@@ -1,7 +1,7 @@
 # main.py — ROBO GLOBAL AI
 # FASE 1 — WEBHOOKS + REGISTRO FINANCEIRO (AFILIADOS)
-# PROPÓSITO ÚNICO: captar e registrar eventos reais de afiliados
-# AJUSTADO AO SCHEMA REAL (sem afiliado_id, sem evento, sem moeda)
+# PROPÓSITO ÚNICO: captar e registrar eventos financeiros reais
+# AJUSTADO AO SCHEMA REAL (sem afiliado_id, evento, moeda, payload_original)
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -53,13 +53,10 @@ def registrar_evento(evento: dict, origem: str):
     if not resposta.data:
         log_humano(origem, "ERRO — falha ao registrar evento no Supabase")
         raise HTTPException(status_code=500, detail="Falha ao registrar evento")
-    log_humano(
-        origem,
-        f"EVENTO FINANCEIRO REGISTRADO — comissão {evento['valor_comissao']}",
-    )
+    log_humano(origem, f"EVENTO FINANCEIRO REGISTRADO — comissão {evento['valor_comissao']}")
 
 # =====================================================
-# NORMALIZAÇÃO
+# NORMALIZAÇÃO (APENAS CAMPOS EXISTENTES NO SCHEMA)
 # =====================================================
 
 def normalizar_evento(plataforma: str, payload: dict) -> dict:
@@ -73,7 +70,6 @@ def normalizar_evento(plataforma: str, payload: dict) -> dict:
             "valor_comissao": payload.get("commission", {}).get("value"),
             "status_financeiro": payload.get("status"),
             "timestamp_evento": payload.get("purchase", {}).get("date") or agora,
-            "payload_original": payload,
         }
 
     if plataforma == "eduzz":
@@ -84,7 +80,6 @@ def normalizar_evento(plataforma: str, payload: dict) -> dict:
             "valor_comissao": payload.get("commission_amount"),
             "status_financeiro": payload.get("sale_status"),
             "timestamp_evento": payload.get("created_at") or agora,
-            "payload_original": payload,
         }
 
     if plataforma == "stripe":
@@ -100,7 +95,6 @@ def normalizar_evento(plataforma: str, payload: dict) -> dict:
                 if data.get("created")
                 else agora
             ),
-            "payload_original": payload,
         }
 
     raise HTTPException(status_code=400, detail="Plataforma não suportada")
@@ -116,7 +110,6 @@ CAMPOS_OBRIGATORIOS = [
     "valor_comissao",
     "status_financeiro",
     "timestamp_evento",
-    "payload_original",
 ]
 
 @app.post("/webhook/hotmart")
