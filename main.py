@@ -1,5 +1,6 @@
 # main.py — ROBO GLOBAL AI
 # ETAPA 3: INGESTÃO DE EVENTOS (RAW)
+# Substituição integral do arquivo (protocolo respeitado)
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,7 +20,7 @@ app = FastAPI(
 )
 
 # ======================================================
-# CORS
+# CORS (dashboard humano no futuro)
 # ======================================================
 app.add_middleware(
     CORSMiddleware,
@@ -36,12 +37,12 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
 if not SUPABASE_URL or not SUPABASE_KEY:
-    raise RuntimeError("Supabase não configurado")
+    raise RuntimeError("Supabase não configurado (env vars ausentes)")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ======================================================
-# HEALTH
+# HEALTH CHECK
 # ======================================================
 @app.get("/health")
 def health():
@@ -52,17 +53,28 @@ def health():
     }
 
 # ======================================================
+# ROOT
+# ======================================================
+@app.get("/")
+def root():
+    return {
+        "message": "Robo Global AI ativo",
+        "stage": "ETAPA 3 — Ingestão RAW"
+    }
+
+# ======================================================
 # WEBHOOK RAW
 # ======================================================
 @app.post("/webhook/{plataforma}")
-async def webhook_raw(plataforma: string, request: Request):
+async def webhook_raw(plataforma: str, request: Request):
     try:
         payload = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Payload inválido")
 
+    # Gera hash determinístico do payload
     payload_str = json.dumps(payload, sort_keys=True)
-    hash_evento = hashlib.sha256(payload_str.encode()).hexdigest()
+    hash_evento = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
 
     data = {
         "plataforma_origem": plataforma,
@@ -74,7 +86,10 @@ async def webhook_raw(plataforma: string, request: Request):
     try:
         supabase.table("robo_global.eventos_afiliados_raw").insert(data).execute()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao gravar evento RAW: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao gravar evento RAW: {str(e)}"
+        )
 
     return {
         "status": "recebido",
