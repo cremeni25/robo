@@ -1,7 +1,7 @@
 # main.py — ROBO GLOBAL AI
 # FASE 1 — WEBHOOKS + REGISTRO FINANCEIRO (AFILIADOS)
 # PROPÓSITO ÚNICO: captar e registrar eventos reais de afiliados
-# AJUSTADO AO SCHEMA REAL (sem evento, sem afiliado_id)
+# AJUSTADO AO SCHEMA REAL (sem afiliado_id, sem evento, sem moeda)
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -55,7 +55,7 @@ def registrar_evento(evento: dict, origem: str):
         raise HTTPException(status_code=500, detail="Falha ao registrar evento")
     log_humano(
         origem,
-        f"EVENTO FINANCEIRO REGISTRADO — {evento['valor_comissao']} {evento['moeda']}",
+        f"EVENTO FINANCEIRO REGISTRADO — comissão {evento['valor_comissao']}",
     )
 
 # =====================================================
@@ -71,7 +71,6 @@ def normalizar_evento(plataforma: str, payload: dict) -> dict:
             "produto_id": payload.get("product", {}).get("id"),
             "valor_bruto": payload.get("purchase", {}).get("price", {}).get("value"),
             "valor_comissao": payload.get("commission", {}).get("value"),
-            "moeda": payload.get("purchase", {}).get("price", {}).get("currency"),
             "status_financeiro": payload.get("status"),
             "timestamp_evento": payload.get("purchase", {}).get("date") or agora,
             "payload_original": payload,
@@ -83,7 +82,6 @@ def normalizar_evento(plataforma: str, payload: dict) -> dict:
             "produto_id": payload.get("product_id"),
             "valor_bruto": payload.get("sale_amount"),
             "valor_comissao": payload.get("commission_amount"),
-            "moeda": payload.get("currency", "BRL"),
             "status_financeiro": payload.get("sale_status"),
             "timestamp_evento": payload.get("created_at") or agora,
             "payload_original": payload,
@@ -96,7 +94,6 @@ def normalizar_evento(plataforma: str, payload: dict) -> dict:
             "produto_id": data.get("metadata", {}).get("product_id"),
             "valor_bruto": (data.get("amount", 0) or 0) / 100,
             "valor_comissao": float(data.get("metadata", {}).get("commission_amount") or 0),
-            "moeda": data.get("currency", "").upper(),
             "status_financeiro": data.get("status"),
             "timestamp_evento": (
                 datetime.utcfromtimestamp(data.get("created", 0)).isoformat()
@@ -117,7 +114,6 @@ CAMPOS_OBRIGATORIOS = [
     "produto_id",
     "valor_bruto",
     "valor_comissao",
-    "moeda",
     "status_financeiro",
     "timestamp_evento",
     "payload_original",
