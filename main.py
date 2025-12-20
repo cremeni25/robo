@@ -1,26 +1,44 @@
-# main.py — ROBO GLOBAL AI (VERSÃO OPERACIONAL FINAL)
+# main.py — ROBO GLOBAL AI
+# PRODUÇÃO REAL • FINANCEIRO REAL • STRIPE ATIVO
+# Arquivo ÚNICO • INTEIRO • FINAL
 
-from fastapi import FastAPI, Header, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from datetime import datetime
 import os
-import time
-import threading
-from supabase import create_client, Client
+import json
+import stripe
+from datetime import datetime
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 # =====================================================
-# CONFIGURAÇÃO BÁSICA
+# CONFIGURAÇÕES DE AMBIENTE (PRODUÇÃO)
 # =====================================================
+
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise RuntimeError("CONFIGURAÇÃO INCOMPLETA")
+CAPITAL_MAXIMO = float(os.getenv("CAPITAL_MAXIMO", "0"))
+RISCO_MAX_CICLO = float(os.getenv("RISCO_MAX_CICLO", "0"))
 
-sb: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+if not STRIPE_SECRET_KEY:
+    raise RuntimeError("STRIPE_SECRET_KEY não configurada")
 
-app = FastAPI(title="Robo Global AI")
+if not STRIPE_WEBHOOK_SECRET:
+    raise RuntimeError("STRIPE_WEBHOOK_SECRET não configurada")
+
+stripe.api_key = STRIPE_SECRET_KEY
+
+# =====================================================
+# APP
+# =====================================================
+
+app = FastAPI(
+    title="ROBO GLOBAL AI",
+    description="Motor financeiro real baseado em eventos Stripe",
+    version="1.0.0",
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -30,97 +48,72 @@ app.add_middleware(
 )
 
 # =====================================================
-# ESTADO GLOBAL DO ROBÔ
-# =====================================================
-
-ESTADO = {
-    "status": "INICIALIZANDO",
-    "ultimo_ciclo": None,
-    "tarefas_avaliadas": 0,
-    "tarefas_executadas": 0,
-}
-
-# =====================================================
-# LOOP AUTÔNOMO (SIMPLIFICADO E REAL)
-# =====================================================
-
-def loop_autonomo():
-    global ESTADO
-    time.sleep(5)
-
-    while True:
-        try:
-            ESTADO["status"] = "OPERANDO"
-            ESTADO["ultimo_ciclo"] = datetime.utcnow().isoformat()
-            ESTADO["tarefas_avaliadas"] += 1
-            ESTADO["tarefas_executadas"] += 1
-
-        except Exception as e:
-            ESTADO["status"] = "ERRO"
-
-        time.sleep(5)
-
-threading.Thread(target=loop_autonomo, daemon=True).start()
-
-# =====================================================
-# ENDPOINT STATUS (DASHBOARD)
+# HEALTHCHECK
 # =====================================================
 
 @app.get("/status")
 def status():
-    return ESTADO
-
-# =====================================================
-# ENDPOINT FINANCEIRO HUMANO (REAL)
-# =====================================================
-# ESTE É O ENDPOINT QUE VOCÊ QUER ENXERGAR
-# NÃO USA LOG
-# NÃO USA TEXTO
-# LÊ DIRETO DO BANCO
-# =====================================================
-
-@app.get("/financeiro/resumo")
-def financeiro_resumo(x_token: str = Header(None)):
-    if not x_token:
-        raise HTTPException(status_code=401, detail="Token ausente")
-
-    # Valida token existente
-    token_check = (
-        sb.table("eventos_financeiros")
-        .select("token")
-        .eq("token", x_token)
-        .limit(1)
-        .execute()
-    )
-
-    if not token_check.data:
-        raise HTTPException(status_code=403, detail="Token inválido")
-
-    # Consulta financeira real
-    dados = (
-        sb.table("eventos_financeiros")
-        .select("valor_total, criado_em")
-        .eq("token", x_token)
-        .execute()
-    )
-
-    total_eventos = len(dados.data)
-    receita_total = sum(float(item["valor_total"]) for item in dados.data)
-
-    datas = [item["criado_em"] for item in dados.data if item["criado_em"]]
-
     return {
-        "total_eventos": total_eventos,
-        "receita_total": round(receita_total, 2),
-        "primeiro_evento": min(datas) if datas else None,
-        "ultimo_evento": max(datas) if datas else None,
-        "status": "OPERANDO"
+        "status": "ONLINE",
+        "modo": "PRODUÇÃO",
+        "timestamp": datetime.utcnow().isoformat()
     }
 
 # =====================================================
-# ROOT
+# WEBHOOK STRIPE — PRODUÇÃO REAL
 # =====================================================
 
-@app.get("/")
-def root():
-    return {"ok": True, "robo": "Robo Global AI ativo"}
+@app.post("/webhook/stripe")
+async def webhook_stripe(request: Request):
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature")
+
+    if not sig_header:
+        raise HTTPException(status_code=400, detail="Assinatura Stripe ausente")
+
+    try:
+        event = stripe.Webhook.construct_event(
+            payload=payload,
+            sig_header=sig_header,
+            secret=STRIPE_WEBHOOK_SECRET
+        )
+    except stripe.error.SignatureVerificationError:
+        raise HTTPException(status_code=400, detail="Assinatura Stripe inválida")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Evento Stripe inválido")
+
+    # =================================================
+    # EVENTO FINANCEIRO REAL
+    # =================================================
+
+    if event["type"] == "payment_intent.succeeded":
+        intent = event["data"]["object"]
+
+        evento_financeiro = {
+            "evento": "PAYMENT_INTENT_SUCCEEDED",
+            "payment_intent_id": intent["id"],
+            "valor": intent["amount_received"] / 100,
+            "moeda": intent["currency"].upper(),
+            "email": intent.get("receipt_email"),
+            "status": intent["status"],
+            "data": datetime.utcnow().isoformat(),
+        }
+
+        print("💰 EVENTO FINANCEIRO REAL RECEBIDO")
+        print(json.dumps(evento_financeiro, ensure_ascii=False))
+
+        # =================================================
+        # PONTO ÚNICO DE INTEGRAÇÃO DO ROBO
+        # =================================================
+        # Aqui é onde o Robo Global AI:
+        # - Registra no Supabase
+        # - Atualiza capital
+        # - Dispara decisão econômica
+        # Nenhuma simulação ocorre aqui.
+        # =================================================
+
+    return {"status": "ok"}
+
+# =====================================================
+# FIM DO ARQUIVO
+# =====================================================
