@@ -1,25 +1,22 @@
 # main.py — versão completa e final
 # ROBO GLOBAL AI — Backend Operacional
-# FastAPI + Supabase + Webhooks + Painel Humano
-# (Correção definitiva do /painel/operacional sem remover funcionalidades)
+# Ajuste de schema: leitura de valor → valor_unitário
+# Nenhuma outra alteração estrutural
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from datetime import datetime
 import os
-import hmac
-import hashlib
 from supabase import create_client
 
 # =====================================================
 # APP
 # =====================================================
 
-app = FastAPI(title="ROBO GLOBAL AI", version="2.0")
+app = FastAPI(title="ROBO GLOBAL AI", version="2.1")
 
 # =====================================================
-# CORS (Dashboard / Painel Humano)
+# CORS
 # =====================================================
 
 app.add_middleware(
@@ -41,7 +38,7 @@ def sb():
     return create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 # =====================================================
-# LOG HUMANO PADRÃO
+# LOG HUMANO
 # =====================================================
 
 def log_humano(origem, nivel, mensagem):
@@ -57,11 +54,11 @@ def normalizar_evento(payload: dict):
 def processar_evento(evento: dict):
     return evento
 
-def calcular_comissao(valor):
-    return round(valor * 0.5, 2)
+def calcular_comissao(valor_unitario):
+    return round(valor_unitario * 0.5, 4)
 
-def calcular_rentabilidade(valor):
-    return round(valor * 0.3, 2)
+def calcular_rentabilidade(valor_unitario):
+    return round(valor_unitario * 0.3, 4)
 
 def analisar_produto(produto):
     return {"produto": produto, "score": 1}
@@ -83,7 +80,7 @@ def gerenciar_escalada():
     return {"escala": "avaliada"}
 
 # =====================================================
-# WEBHOOK UNIVERSAL
+# WEBHOOKS
 # =====================================================
 
 @app.post("/webhook/universal")
@@ -94,10 +91,6 @@ async def webhook_universal(request: Request):
     log_humano("WEBHOOK", "INFO", "Evento universal registrado")
     return {"status": "ok"}
 
-# =====================================================
-# WEBHOOK HOTMART
-# =====================================================
-
 @app.post("/webhook/hotmart")
 async def webhook_hotmart(request: Request):
     payload = await request.json()
@@ -105,10 +98,6 @@ async def webhook_hotmart(request: Request):
     registrar_operacao(evento)
     log_humano("HOTMART", "INFO", "Evento Hotmart registrado")
     return {"status": "ok"}
-
-# =====================================================
-# WEBHOOK EDUZZ
-# =====================================================
 
 @app.post("/webhook/eduzz")
 async def webhook_eduzz(request: Request):
@@ -129,9 +118,9 @@ def status():
 @app.get("/capital")
 def capital():
     supabase = sb()
-    res = supabase.table("eventos_financeiros").select("valor").execute()
-    total = sum([(r.get("valor") or 0) for r in (res.data or [])])
-    return {"capital": round(total, 2)}
+    res = supabase.table("eventos_financeiros").select("valor_unitário").execute()
+    total = sum([(r.get("valor_unitário") or 0) for r in (res.data or [])])
+    return {"capital": round(total, 4)}
 
 @app.get("/decisao")
 def decisao():
@@ -144,12 +133,12 @@ def ciclo():
 @app.get("/resultado")
 def resultado():
     supabase = sb()
-    res = supabase.table("eventos_financeiros").select("valor").execute()
-    total = sum([(r.get("valor") or 0) for r in (res.data or [])])
-    return {"resultado_total": round(total, 2)}
+    res = supabase.table("eventos_financeiros").select("valor_unitário").execute()
+    total = sum([(r.get("valor_unitário") or 0) for r in (res.data or [])])
+    return {"resultado_total": round(total, 4)}
 
 # =====================================================
-# PAINEL OPERACIONAL (CORRIGIDO — NUNCA 500)
+# PAINEL OPERACIONAL (ALINHADO AO SCHEMA)
 # =====================================================
 
 @app.get("/painel/operacional")
@@ -159,7 +148,7 @@ def painel_operacional():
 
         response = (
             supabase.table("eventos_financeiros")
-            .select("valor, created_at")
+            .select("valor_unitário, created_at")
             .order("created_at", desc=True)
             .limit(100)
             .execute()
@@ -167,7 +156,7 @@ def painel_operacional():
 
         eventos = response.data or []
         total_eventos = len(eventos)
-        total_valor = sum([(e.get("valor") or 0) for e in eventos])
+        total_valor = sum([(e.get("valor_unitário") or 0) for e in eventos])
 
         ultimo_evento = eventos[0]["created_at"] if total_eventos > 0 else None
 
@@ -175,7 +164,7 @@ def painel_operacional():
             "status": "ativo",
             "eventos_recebidos": total_eventos,
             "ultimo_evento": ultimo_evento,
-            "resultado_total": round(total_valor, 2),
+            "resultado_total": round(total_valor, 4),
             "mensagem": (
                 "Sistema ativo e monitorando eventos reais"
                 if total_eventos > 0
@@ -203,8 +192,8 @@ def painel_operacional():
 @app.get("/widget-ranking")
 def widget_ranking():
     supabase = sb()
-    res = supabase.table("eventos_financeiros").select("valor").execute()
-    valores = [r.get("valor") for r in (res.data or [])]
+    res = supabase.table("eventos_financeiros").select("valor_unitário").execute()
+    valores = [r.get("valor_unitário") for r in (res.data or [])]
     return {"ranking": sorted(valores, reverse=True)}
 
 # =====================================================
