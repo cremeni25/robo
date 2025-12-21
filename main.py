@@ -1,7 +1,7 @@
 # main.py — versão completa e final
 # ROBO GLOBAL AI — Backend Operacional
-# Ajuste de schema: leitura de valor → valor_unitário
-# Nenhuma outra alteração estrutural
+# Correção definitiva de schema: valor_unitário ➜ valor_unitario
+# Nenhuma outra alteração realizada
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,7 +13,7 @@ from supabase import create_client
 # APP
 # =====================================================
 
-app = FastAPI(title="ROBO GLOBAL AI", version="2.1")
+app = FastAPI(title="ROBO GLOBAL AI", version="2.2")
 
 # =====================================================
 # CORS
@@ -118,8 +118,8 @@ def status():
 @app.get("/capital")
 def capital():
     supabase = sb()
-    res = supabase.table("eventos_financeiros").select("valor_unitário").execute()
-    total = sum([(r.get("valor_unitário") or 0) for r in (res.data or [])])
+    res = supabase.table("eventos_financeiros").select("valor_unitario").execute()
+    total = sum([(r.get("valor_unitario") or 0) for r in (res.data or [])])
     return {"capital": round(total, 4)}
 
 @app.get("/decisao")
@@ -133,12 +133,12 @@ def ciclo():
 @app.get("/resultado")
 def resultado():
     supabase = sb()
-    res = supabase.table("eventos_financeiros").select("valor_unitário").execute()
-    total = sum([(r.get("valor_unitário") or 0) for r in (res.data or [])])
+    res = supabase.table("eventos_financeiros").select("valor_unitario").execute()
+    total = sum([(r.get("valor_unitario") or 0) for r in (res.data or [])])
     return {"resultado_total": round(total, 4)}
 
 # =====================================================
-# PAINEL OPERACIONAL (ALINHADO AO SCHEMA)
+# PAINEL OPERACIONAL (ALINHADO AO SCHEMA REAL)
 # =====================================================
 
 @app.get("/painel/operacional")
@@ -148,7 +148,7 @@ def painel_operacional():
 
         response = (
             supabase.table("eventos_financeiros")
-            .select("valor_unitário, created_at")
+            .select("valor_unitario, created_at")
             .order("created_at", desc=True)
             .limit(100)
             .execute()
@@ -156,7 +156,7 @@ def painel_operacional():
 
         eventos = response.data or []
         total_eventos = len(eventos)
-        total_valor = sum([(e.get("valor_unitário") or 0) for e in eventos])
+        total_valor = sum([(e.get("valor_unitario") or 0) for e in eventos])
 
         ultimo_evento = eventos[0]["created_at"] if total_eventos > 0 else None
 
@@ -192,8 +192,8 @@ def painel_operacional():
 @app.get("/widget-ranking")
 def widget_ranking():
     supabase = sb()
-    res = supabase.table("eventos_financeiros").select("valor_unitário").execute()
-    valores = [r.get("valor_unitário") for r in (res.data or [])]
+    res = supabase.table("eventos_financeiros").select("valor_unitario").execute()
+    valores = [r.get("valor_unitario") for r in (res.data or [])]
     return {"ranking": sorted(valores, reverse=True)}
 
 # =====================================================
