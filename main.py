@@ -1,7 +1,7 @@
-# main.py — Camada de Execução CONTROLADA (Modo Manual)
+# main.py — Camada de ESCALA CONTROLADA (Automação Gradual)
 # Sequencial ao Plano Diretor
-# Escopo: executar ações somente sob comando humano explícito
-# Sem autonomia • Sem escala • Com registro total
+# Escopo: executar automaticamente decisões AUTORIZADAS, com freios
+# Com limites • Com pausa • Com auditoria • Sem autonomia plena
 
 import os
 from datetime import datetime
@@ -16,6 +16,10 @@ from supabase import create_client, Client
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
+CAPITAL_MAXIMO = float(os.getenv("CAPITAL_MAXIMO", "300"))
+RISCO_MAXIMO = float(os.getenv("RISCO_MAXIMO", "40"))
+ESCALA_ATIVA = os.getenv("ESCALA_ATIVA", "false").lower() == "true"
+
 if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
     raise RuntimeError("Variáveis SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY são obrigatórias")
 
@@ -25,7 +29,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 # APP
 # =====================================================
 
-app = FastAPI(title="Robo Global AI — Execução Controlada Manual")
+app = FastAPI(title="Robo Global AI — Escala Controlada")
 
 app.add_middleware(
     CORSMiddleware,
@@ -35,54 +39,98 @@ app.add_middleware(
 )
 
 # =====================================================
-# EXECUÇÃO CONTROLADA
+# FUNÇÕES DE CONTROLE
 # =====================================================
 
-def executar_acao(decisao: dict) -> dict:
-    """
-    Execução manual controlada.
-    Aqui a ação é apenas registrada (stub),
-    sem integração externa automática.
-    """
+def capital_disponivel() -> float:
+    registros = supabase.table("eventos_execucoes_automaticas") \
+        .select("valor") \
+        .execute()
+    utilizado = sum(r.get("valor") or 0 for r in registros.data)
+    return max(CAPITAL_MAXIMO - utilizado, 0)
+
+def pode_executar(decisao: dict) -> bool:
+    if not ESCALA_ATIVA:
+        return False
+    if capital_disponivel() <= 0:
+        return False
+    if decisao.get("risco", 0) > RISCO_MAXIMO:
+        return False
+    return True
+
+def executar_automatico(decisao: dict) -> dict:
     return {
         "decisao_id": decisao["id"],
-        "acao_executada": "registrada_manual",
+        "acao": "executada_automatica",
+        "valor": decisao.get("valor"),
         "resultado": "ok",
         "executado_em": datetime.utcnow().isoformat()
     }
 
 # =====================================================
-# ENDPOINT MANUAL DE EXECUÇÃO
+# CICLO DE ESCALA CONTROLADA
 # =====================================================
 
-@app.post("/execucao/manual/{decisao_id}")
-def executar_manual(decisao_id: str):
-    # Buscar decisão
-    decisao = supabase.table("eventos_decisoes_observacao") \
+@app.post("/escala/ciclo")
+def ciclo_escala():
+    if not ESCALA_ATIVA:
+        raise HTTPException(status_code=403, detail="Escala automática desativada")
+
+    decisoes = supabase.table("eventos_decisoes_observacao") \
         .select("*") \
-        .eq("id", decisao_id) \
+        .eq("decisao", "observar_receita") \
+        .eq("executado", False) \
+        .limit(10) \
         .execute()
 
-    if not decisao.data:
-        raise HTTPException(status_code=404, detail="Decisão não encontrada")
+    executadas = []
 
-    decisao = decisao.data[0]
+    for decisao in decisoes.data:
+        if not pode_executar(decisao):
+            continue
 
-    # Executar ação (controlada)
-    resultado = executar_acao(decisao)
+        resultado = executar_automatico(decisao)
 
-    # Registrar execução
-    supabase.table("eventos_execucoes_manuais").insert({
-        "decisao_id": decisao_id,
-        "acao": resultado["acao_executada"],
-        "resultado": resultado["resultado"],
-        "executado_em": resultado["executado_em"]
-    }).execute()
+        supabase.table("eventos_execucoes_automaticas").insert({
+            "decisao_id": decisao["id"],
+            "acao": resultado["acao"],
+            "valor": resultado.get("valor"),
+            "resultado": resultado["resultado"],
+            "executado_em": resultado["executado_em"]
+        }).execute()
+
+        supabase.table("eventos_decisoes_observacao") \
+            .update({"executado": True}) \
+            .eq("id", decisao["id"]) \
+            .execute()
+
+        executadas.append(resultado)
 
     return {
         "status": "ok",
-        "mensagem": "Ação executada manualmente",
-        "resultado": resultado
+        "executadas": len(executadas),
+        "capital_restante": capital_disponivel(),
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+# =====================================================
+# CONTROLES HUMANOS
+# =====================================================
+
+@app.post("/escala/ativar")
+def ativar_escala():
+    return {
+        "status": "ok",
+        "escala": "ativa",
+        "observacao": "Defina ESCALA_ATIVA=true no ambiente para efetivar"
+    }
+
+@app.post("/escala/pausar")
+def pausar_escala():
+    return {
+        "status": "ok",
+        "escala": "pausada",
+        "observacao": "Defina ESCALA_ATIVA=false no ambiente para efetivar"
     }
 
 # =====================================================
@@ -92,8 +140,10 @@ def executar_manual(decisao_id: str):
 @app.get("/status")
 def status():
     return {
-        "servico": "Robo Global AI — Execução Controlada",
+        "servico": "Robo Global AI — Escala Controlada",
         "estado": "ativo",
-        "modo": "manual",
+        "escala_ativa": ESCALA_ATIVA,
+        "capital_maximo": CAPITAL_MAXIMO,
+        "risco_maximo": RISCO_MAXIMO,
         "timestamp": datetime.utcnow().isoformat()
     }
