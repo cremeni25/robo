@@ -1,11 +1,13 @@
 # main.py — versão completa e final
-# ROBO GLOBAL AI — Backend Operacional
-# Schema alinhado: valor_unitario + created_at
-# Painel operacional definitivo
+# ROBO GLOBAL AI — C3 IMPLEMENTADO
+# Estado calculado sob demanda (stateless)
+# Métricas de capital e risco
+# Endpoints de leitura + painel humano
+# SEM decisão econômica • SEM ciclo automático
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from datetime import datetime
+from datetime import datetime, date
 import os
 from supabase import create_client
 
@@ -13,7 +15,7 @@ from supabase import create_client
 # APP
 # =====================================================
 
-app = FastAPI(title="ROBO GLOBAL AI", version="2.3")
+app = FastAPI(title="ROBO GLOBAL AI", version="3.0")
 
 # =====================================================
 # CORS
@@ -45,161 +47,200 @@ def log_humano(origem, nivel, mensagem):
     print(f"[{origem}] [{nivel}] {mensagem}")
 
 # =====================================================
-# FUNÇÕES NÚCLEO (MANTIDAS)
+# CONSTANTES DE RISCO (C1)
 # =====================================================
 
-def normalizar_evento(payload: dict):
-    return payload
+CAPITAL_OPERACIONAL_PERC = 0.30
+CAPITAL_PROTEGIDO_PERC = 0.70
 
-def processar_evento(evento: dict):
-    return evento
+RISCO_POR_CICLO_MAX = 0.05
+RISCO_DIARIO_MAX = 0.10
+RISCO_ACUMULADO_MAX = 0.20
 
-def calcular_comissao(valor_unitario):
-    return round(valor_unitario * 0.5, 4)
+# =====================================================
+# FUNÇÕES BASE (LEITURA)
+# =====================================================
 
-def calcular_rentabilidade(valor_unitario):
-    return round(valor_unitario * 0.3, 4)
-
-def analisar_produto(produto):
-    return {"produto": produto, "score": 1}
-
-def escolher_melhor_oferta(ofertas):
-    return ofertas[0] if ofertas else None
-
-def pipeline_operacional(evento):
-    return evento
-
-def registrar_operacao(evento):
+def buscar_eventos():
     supabase = sb()
-    supabase.table("eventos_financeiros").insert(evento).execute()
-
-def executar_ciclo():
-    return {"ciclo": "executado"}
-
-def gerenciar_escalada():
-    return {"escala": "avaliada"}
+    res = (
+        supabase.table("eventos_financeiros")
+        .select("valor_unitario, created_at")
+        .execute()
+    )
+    return res.data or []
 
 # =====================================================
-# WEBHOOKS
+# MÉTRICAS DE CAPITAL
+# =====================================================
+
+def calcular_capital(eventos):
+    capital_total = sum([(e.get("valor_unitario") or 0) for e in eventos])
+
+    capital_protegido = capital_total * CAPITAL_PROTEGIDO_PERC
+    capital_operacional_max = capital_total * CAPITAL_OPERACIONAL_PERC
+
+    # Neste estágio não existe capital "em risco" real
+    capital_operacional_disponivel = capital_operacional_max
+
+    return {
+        "capital_total": round(capital_total, 4),
+        "capital_protegido": round(capital_protegido, 4),
+        "capital_operacional_max": round(capital_operacional_max, 4),
+        "capital_operacional_disponivel": round(capital_operacional_disponivel, 4),
+    }
+
+# =====================================================
+# MÉTRICAS DE RISCO (ESTÁGIO ATUAL: SEM EXPOSIÇÃO)
+# =====================================================
+
+def calcular_risco(eventos, capital_total):
+    if capital_total <= 0:
+        return {
+            "risco_por_ciclo": 0.0,
+            "risco_diario": 0.0,
+            "risco_acumulado": 0.0,
+        }
+
+    # Como ainda não há operações de risco,
+    # todas as métricas permanecem em 0
+    return {
+        "risco_por_ciclo": 0.0,
+        "risco_diario": 0.0,
+        "risco_acumulado": 0.0,
+    }
+
+# =====================================================
+# ESTADO DO ROBÔ (CALCULADO SOB DEMANDA)
+# =====================================================
+
+def calcular_estado_robo(capital, risco):
+    estado_atual = "OBSERVACAO"
+    pode_operar = False
+    ciclos_negativos_consecutivos = 0
+
+    if capital["capital_operacional_disponivel"] > 0 and risco["risco_diario"] < 0.05:
+        estado_atual = "OPERACIONAL"
+        pode_operar = True
+
+    if risco["risco_acumulado"] >= RISCO_ACUMULADO_MAX:
+        estado_atual = "PAUSADO"
+        pode_operar = False
+
+    return {
+        "estado_atual": estado_atual,
+        "pode_operar": pode_operar,
+        "ciclos_negativos_consecutivos": ciclos_negativos_consecutivos,
+    }
+
+# =====================================================
+# WEBHOOKS (MANTIDOS — REGISTRO APENAS)
 # =====================================================
 
 @app.post("/webhook/universal")
 async def webhook_universal(request: Request):
     payload = await request.json()
-    evento = normalizar_evento(payload)
-    registrar_operacao(evento)
+    supabase = sb()
+    supabase.table("eventos_financeiros").insert(payload).execute()
     log_humano("WEBHOOK", "INFO", "Evento universal registrado")
     return {"status": "ok"}
 
 @app.post("/webhook/hotmart")
 async def webhook_hotmart(request: Request):
     payload = await request.json()
-    evento = normalizar_evento(payload)
-    registrar_operacao(evento)
+    supabase = sb()
+    supabase.table("eventos_financeiros").insert(payload).execute()
     log_humano("HOTMART", "INFO", "Evento Hotmart registrado")
     return {"status": "ok"}
 
 @app.post("/webhook/eduzz")
 async def webhook_eduzz(request: Request):
     payload = await request.json()
-    evento = normalizar_evento(payload)
-    registrar_operacao(evento)
+    supabase = sb()
+    supabase.table("eventos_financeiros").insert(payload).execute()
     log_humano("EDUZZ", "INFO", "Evento Eduzz registrado")
     return {"status": "ok"}
 
 # =====================================================
-# ENDPOINTS OPERACIONAIS
-# =====================================================
-
-@app.get("/status")
-def status():
-    return {"status": "ativo", "timestamp": datetime.utcnow().isoformat()}
-
-@app.get("/capital")
-def capital():
-    supabase = sb()
-    res = supabase.table("eventos_financeiros").select("valor_unitario").execute()
-    total = sum([(r.get("valor_unitario") or 0) for r in (res.data or [])])
-    return {"capital": round(total, 4)}
-
-@app.get("/decisao")
-def decisao():
-    return {"decisao": "monitorar"}
-
-@app.get("/ciclo")
-def ciclo():
-    return executar_ciclo()
-
-@app.get("/resultado")
-def resultado():
-    supabase = sb()
-    res = supabase.table("eventos_financeiros").select("valor_unitario").execute()
-    total = sum([(r.get("valor_unitario") or 0) for r in (res.data or [])])
-    return {"resultado_total": round(total, 4)}
-
-# =====================================================
-# PAINEL OPERACIONAL — DEFINITIVO
-# =====================================================
-
-@app.get("/painel/operacional")
-def painel_operacional():
-    try:
-        supabase = sb()
-
-        response = (
-            supabase.table("eventos_financeiros")
-            .select("valor_unitario, created_at")
-            .order("created_at", desc=True)
-            .limit(100)
-            .execute()
-        )
-
-        eventos = response.data or []
-        total_eventos = len(eventos)
-        total_valor = sum([(e.get("valor_unitario") or 0) for e in eventos])
-
-        ultimo_evento = eventos[0]["created_at"] if total_eventos > 0 else None
-
-        return {
-            "status": "ativo",
-            "eventos_recebidos": total_eventos,
-            "ultimo_evento": ultimo_evento,
-            "resultado_total": round(total_valor, 4),
-            "mensagem": (
-                "Sistema ativo e monitorando eventos reais"
-                if total_eventos > 0
-                else "Sistema ativo, aguardando eventos reais"
-            ),
-            "timestamp": datetime.utcnow().isoformat(),
-        }
-
-    except Exception as e:
-        log_humano("PAINEL", "ERRO", str(e))
-        return {
-            "status": "erro_controlado",
-            "eventos_recebidos": 0,
-            "ultimo_evento": None,
-            "resultado_total": 0,
-            "mensagem": "Falha ao carregar painel operacional",
-            "detalhe": str(e),
-            "timestamp": datetime.utcnow().isoformat(),
-        }
-
-# =====================================================
-# WIDGET RANKING
-# =====================================================
-
-@app.get("/widget-ranking")
-def widget_ranking():
-    supabase = sb()
-    res = supabase.table("eventos_financeiros").select("valor_unitario").execute()
-    valores = [r.get("valor_unitario") for r in (res.data or [])]
-    return {"ranking": sorted(valores, reverse=True)}
-
-# =====================================================
-# ROOT
+# ENDPOINTS BASE
 # =====================================================
 
 @app.get("/")
 def root():
     return {"robo": "ROBO GLOBAL AI", "status": "online"}
+
+@app.get("/status")
+def status():
+    return {"status": "ativo", "timestamp": datetime.utcnow().isoformat()}
+
+# =====================================================
+# C3 — ENDPOINTS DE LEITURA
+# =====================================================
+
+@app.get("/capital-detalhado")
+def capital_detalhado():
+    eventos = buscar_eventos()
+    capital = calcular_capital(eventos)
+    return capital
+
+@app.get("/risco")
+def risco():
+    eventos = buscar_eventos()
+    capital = calcular_capital(eventos)
+    risco = calcular_risco(eventos, capital["capital_total"])
+
+    return {
+        "risco_por_ciclo": f"{round(risco['risco_por_ciclo'] * 100, 2)}%",
+        "risco_diario": f"{round(risco['risco_diario'] * 100, 2)}%",
+        "risco_acumulado": f"{round(risco['risco_acumulado'] * 100, 2)}%",
+    }
+
+@app.get("/estado")
+def estado():
+    eventos = buscar_eventos()
+    capital = calcular_capital(eventos)
+    risco = calcular_risco(eventos, capital["capital_total"])
+    estado = calcular_estado_robo(capital, risco)
+
+    return estado
+
+@app.get("/controle")
+def controle():
+    eventos = buscar_eventos()
+    capital = calcular_capital(eventos)
+    risco = calcular_risco(eventos, capital["capital_total"])
+
+    stop_geral = risco["risco_acumulado"] >= RISCO_ACUMULADO_MAX
+
+    return {
+        "stop_geral_acionado": stop_geral,
+        "motivo": "Risco acumulado excedeu limite"
+        if stop_geral
+        else None,
+    }
+
+# =====================================================
+# PAINEL HUMANO (CONSOLIDADO)
+# =====================================================
+
+@app.get("/painel/gestor")
+def painel_gestor():
+    eventos = buscar_eventos()
+    capital = calcular_capital(eventos)
+    risco = calcular_risco(eventos, capital["capital_total"])
+    estado = calcular_estado_robo(capital, risco)
+
+    return {
+        "estado": {
+            "estado_atual": estado["estado_atual"],
+            "pode_operar": estado["pode_operar"],
+            "ciclos_negativos_consecutivos": estado["ciclos_negativos_consecutivos"],
+        },
+        "capital": capital,
+        "risco": {
+            "risco_por_ciclo": f"{round(risco['risco_por_ciclo'] * 100, 2)}%",
+            "risco_diario": f"{round(risco['risco_diario'] * 100, 2)}%",
+            "risco_acumulado": f"{round(risco['risco_acumulado'] * 100, 2)}%",
+        },
+        "timestamp": datetime.utcnow().isoformat(),
+    }
