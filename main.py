@@ -1,7 +1,7 @@
-# main.py — Camada de ESCALA CONTROLADA (Automação Gradual)
+# main.py — Camada de AUTONOMIA SUPERVISIONADA
 # Sequencial ao Plano Diretor
-# Escopo: executar automaticamente decisões AUTORIZADAS, com freios
-# Com limites • Com pausa • Com auditoria • Sem autonomia plena
+# Escopo: o Robo PROPÕE ajustes, o humano DECIDE
+# Sem autonomia plena • Sem execução automática de mudanças • Tudo auditável
 
 import os
 from datetime import datetime
@@ -16,10 +16,6 @@ from supabase import create_client, Client
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
-CAPITAL_MAXIMO = float(os.getenv("CAPITAL_MAXIMO", "300"))
-RISCO_MAXIMO = float(os.getenv("RISCO_MAXIMO", "40"))
-ESCALA_ATIVA = os.getenv("ESCALA_ATIVA", "false").lower() == "true"
-
 if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
     raise RuntimeError("Variáveis SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY são obrigatórias")
 
@@ -29,7 +25,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 # APP
 # =====================================================
 
-app = FastAPI(title="Robo Global AI — Escala Controlada")
+app = FastAPI(title="Robo Global AI — Autonomia Supervisionada")
 
 app.add_middleware(
     CORSMiddleware,
@@ -39,98 +35,82 @@ app.add_middleware(
 )
 
 # =====================================================
-# FUNÇÕES DE CONTROLE
+# LÓGICA DE PROPOSTA DE AJUSTES
 # =====================================================
 
-def capital_disponivel() -> float:
-    registros = supabase.table("eventos_execucoes_automaticas") \
-        .select("valor") \
+def gerar_proposta_ajuste() -> dict:
+    """
+    Analisa resultados passados e propõe ajustes.
+    NÃO executa nada.
+    """
+    execs = supabase.table("eventos_execucoes_automaticas") \
+        .select("resultado, valor") \
         .execute()
-    utilizado = sum(r.get("valor") or 0 for r in registros.data)
-    return max(CAPITAL_MAXIMO - utilizado, 0)
 
-def pode_executar(decisao: dict) -> bool:
-    if not ESCALA_ATIVA:
-        return False
-    if capital_disponivel() <= 0:
-        return False
-    if decisao.get("risco", 0) > RISCO_MAXIMO:
-        return False
-    return True
+    total = len(execs.data)
+    sucesso = len([e for e in execs.data if e.get("resultado") == "ok"])
 
-def executar_automatico(decisao: dict) -> dict:
+    taxa_sucesso = (sucesso / total) if total > 0 else 0
+
+    proposta = {
+        "tipo": "ajuste_parametro",
+        "descricao": "Ajustar capital_maximo",
+        "taxa_sucesso": taxa_sucesso,
+        "sugestao": "aumentar" if taxa_sucesso > 0.7 else "manter",
+        "criado_em": datetime.utcnow().isoformat(),
+        "status": "pendente"
+    }
+
+    return proposta
+
+# =====================================================
+# ENDPOINT — GERAR PROPOSTA
+# =====================================================
+
+@app.post("/autonomia/propor")
+def propor_ajuste():
+    proposta = gerar_proposta_ajuste()
+
+    result = supabase.table("eventos_propostas_autonomia") \
+        .insert(proposta) \
+        .execute()
+
+    if not result.data:
+        raise HTTPException(status_code=500, detail="Falha ao registrar proposta")
+
     return {
-        "decisao_id": decisao["id"],
-        "acao": "executada_automatica",
-        "valor": decisao.get("valor"),
-        "resultado": "ok",
-        "executado_em": datetime.utcnow().isoformat()
+        "status": "ok",
+        "proposta": result.data[0]
     }
 
 # =====================================================
-# CICLO DE ESCALA CONTROLADA
+# ENDPOINT — DECISÃO HUMANA
 # =====================================================
 
-@app.post("/escala/ciclo")
-def ciclo_escala():
-    if not ESCALA_ATIVA:
-        raise HTTPException(status_code=403, detail="Escala automática desativada")
-
-    decisoes = supabase.table("eventos_decisoes_observacao") \
+@app.post("/autonomia/decidir/{proposta_id}")
+def decidir_proposta(proposta_id: str, aprovado: bool):
+    proposta = supabase.table("eventos_propostas_autonomia") \
         .select("*") \
-        .eq("decisao", "observar_receita") \
-        .eq("executado", False) \
-        .limit(10) \
+        .eq("id", proposta_id) \
         .execute()
 
-    executadas = []
+    if not proposta.data:
+        raise HTTPException(status_code=404, detail="Proposta não encontrada")
 
-    for decisao in decisoes.data:
-        if not pode_executar(decisao):
-            continue
+    status = "aprovada" if aprovado else "rejeitada"
 
-        resultado = executar_automatico(decisao)
-
-        supabase.table("eventos_execucoes_automaticas").insert({
-            "decisao_id": decisao["id"],
-            "acao": resultado["acao"],
-            "valor": resultado.get("valor"),
-            "resultado": resultado["resultado"],
-            "executado_em": resultado["executado_em"]
-        }).execute()
-
-        supabase.table("eventos_decisoes_observacao") \
-            .update({"executado": True}) \
-            .eq("id", decisao["id"]) \
-            .execute()
-
-        executadas.append(resultado)
+    supabase.table("eventos_propostas_autonomia") \
+        .update({
+            "status": status,
+            "decidido_em": datetime.utcnow().isoformat()
+        }) \
+        .eq("id", proposta_id) \
+        .execute()
 
     return {
         "status": "ok",
-        "executadas": len(executadas),
-        "capital_restante": capital_disponivel(),
-        "timestamp": datetime.utcnow().isoformat()
-    }
-
-# =====================================================
-# CONTROLES HUMANOS
-# =====================================================
-
-@app.post("/escala/ativar")
-def ativar_escala():
-    return {
-        "status": "ok",
-        "escala": "ativa",
-        "observacao": "Defina ESCALA_ATIVA=true no ambiente para efetivar"
-    }
-
-@app.post("/escala/pausar")
-def pausar_escala():
-    return {
-        "status": "ok",
-        "escala": "pausada",
-        "observacao": "Defina ESCALA_ATIVA=false no ambiente para efetivar"
+        "proposta_id": proposta_id,
+        "decisao": status
     }
 
 # =====================================================
@@ -140,10 +120,7 @@ def pausar_escala():
 @app.get("/status")
 def status():
     return {
-        "servico": "Robo Global AI — Escala Controlada",
+        "servico": "Robo Global AI — Autonomia Supervisionada",
         "estado": "ativo",
-        "escala_ativa": ESCALA_ATIVA,
-        "capital_maximo": CAPITAL_MAXIMO,
-        "risco_maximo": RISCO_MAXIMO,
         "timestamp": datetime.utcnow().isoformat()
     }
