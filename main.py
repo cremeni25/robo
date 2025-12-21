@@ -1,13 +1,11 @@
-# main.py — Camada de Integração + Normalização MÍNIMA
+# main.py — Camada de Decisão Econômica MÍNIMA (Modo Observação)
 # Sequencial ao Plano Diretor
-# Escopo: eventos brutos → eventos normalizados
-# Sem decisão • Sem Robo • Sem escala • Sem dashboard
+# Escopo: leitura de eventos normalizados → decisão registrada
+# Sem execução • Sem escala • Sem Robo • Sem dashboard
 
 import os
-import hmac
-import hashlib
 from datetime import datetime
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client, Client
 
@@ -18,9 +16,6 @@ from supabase import create_client, Client
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
-HOTMART_WEBHOOK_SECRET = os.getenv("HOTMART_WEBHOOK_SECRET")
-EDUZZ_WEBHOOK_SECRET = os.getenv("EDUZZ_WEBHOOK_SECRET")
-
 if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
     raise RuntimeError("Variáveis SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY são obrigatórias")
 
@@ -30,7 +25,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 # APP
 # =====================================================
 
-app = FastAPI(title="Robo Global AI — Normalização Mínima")
+app = FastAPI(title="Robo Global AI — Decisão Econômica Mínima (Observação)")
 
 app.add_middleware(
     CORSMiddleware,
@@ -40,79 +35,73 @@ app.add_middleware(
 )
 
 # =====================================================
-# UTILITÁRIOS
+# LÓGICA DE DECISÃO MÍNIMA
 # =====================================================
 
-def validar_hmac(secret: str, body: bytes, assinatura: str) -> bool:
-    if not secret:
-        return True
-    digest = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(digest, assinatura)
+def decidir_evento(evento: dict) -> dict:
+    """
+    Decisão econômica mínima (modo observação):
+    Não executa ações — apenas classifica.
+    """
+    valor = evento.get("valor")
+    tipo = evento.get("tipo_evento")
+    plataforma = evento.get("plataforma")
 
-def normalizar_evento(plataforma: str, payload: dict) -> dict:
-    """
-    Normalização mínima:
-    cria um formato comum independente da origem
-    """
+    if tipo in ["PURCHASE_APPROVED", "approved", "sale"] and valor:
+        decisao = "observar_receita"
+    elif tipo in ["refund", "chargeback", "canceled"]:
+        decisao = "observar_risco"
+    else:
+        decisao = "ignorar"
+
     return {
         "plataforma": plataforma,
-        "tipo_evento": payload.get("event") or payload.get("type") or "desconhecido",
-        "valor": payload.get("value") or payload.get("price") or None,
-        "moeda": payload.get("currency") or "BRL",
-        "referencia": payload.get("transaction") or payload.get("purchase_id"),
-        "payload_original": payload,
+        "tipo_evento": tipo,
+        "valor": valor,
+        "decisao": decisao,
+        "referencia": evento.get("referencia"),
         "criado_em": datetime.utcnow().isoformat(),
     }
 
-def persistir_bruto(plataforma: str, payload: dict):
-    supabase.table("eventos_afiliados_brutos").insert({
-        "plataforma_origem": plataforma,
-        "payload_original": payload,
-        "hash_evento": payload.get("event", f"{plataforma}_{datetime.utcnow().isoformat()}"),
-    }).execute()
+def processar_decisoes():
+    """
+    Lê eventos normalizados ainda não avaliados
+    e registra decisão econômica mínima.
+    """
+    eventos = supabase.table("eventos_afiliados_normalizados") \
+        .select("*") \
+        .eq("avaliado", False) \
+        .limit(50) \
+        .execute()
 
-def persistir_normalizado(evento_normalizado: dict):
-    supabase.table("eventos_afiliados_normalizados").insert(evento_normalizado).execute()
+    if not eventos.data:
+        return 0
 
-# =====================================================
-# WEBHOOK HOTMART
-# =====================================================
+    for evento in eventos.data:
+        decisao = decidir_evento(evento)
 
-@app.post("/webhook/hotmart")
-async def webhook_hotmart(request: Request):
-    raw_body = await request.body()
-    assinatura = request.headers.get("X-Hotmart-Hmac-SHA256", "")
+        supabase.table("eventos_decisoes_observacao").insert(decisao).execute()
 
-    if not validar_hmac(HOTMART_WEBHOOK_SECRET, raw_body, assinatura):
-        raise HTTPException(status_code=401, detail="Assinatura Hotmart inválida")
+        supabase.table("eventos_afiliados_normalizados") \
+            .update({"avaliado": True}) \
+            .eq("id", evento["id"]) \
+            .execute()
 
-    payload = await request.json()
-
-    persistir_bruto("hotmart", payload)
-    evento_norm = normalizar_evento("hotmart", payload)
-    persistir_normalizado(evento_norm)
-
-    return {"status": "ok", "origem": "hotmart", "normalizado": True}
+    return len(eventos.data)
 
 # =====================================================
-# WEBHOOK EDUZZ
+# ENDPOINT DE CICLO (HUMANO / MANUAL)
 # =====================================================
 
-@app.post("/webhook/eduzz")
-async def webhook_eduzz(request: Request):
-    raw_body = await request.body()
-    assinatura = request.headers.get("X-Eduzz-Signature", "")
-
-    if not validar_hmac(EDUZZ_WEBHOOK_SECRET, raw_body, assinatura):
-        raise HTTPException(status_code=401, detail="Assinatura Eduzz inválida")
-
-    payload = await request.json()
-
-    persistir_bruto("eduzz", payload)
-    evento_norm = normalizar_evento("eduzz", payload)
-    persistir_normalizado(evento_norm)
-
-    return {"status": "ok", "origem": "eduzz", "normalizado": True}
+@app.post("/ciclo/decisao")
+def ciclo_decisao():
+    quantidade = processar_decisoes()
+    return {
+        "status": "ok",
+        "eventos_processados": quantidade,
+        "modo": "observacao",
+        "timestamp": datetime.utcnow().isoformat()
+    }
 
 # =====================================================
 # STATUS HUMANO
@@ -121,7 +110,8 @@ async def webhook_eduzz(request: Request):
 @app.get("/status")
 def status():
     return {
-        "servico": "Robo Global AI — Normalização Mínima",
+        "servico": "Robo Global AI — Decisão Econômica Mínima",
         "estado": "ativo",
+        "modo": "observacao",
         "timestamp": datetime.utcnow().isoformat()
     }
