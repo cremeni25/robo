@@ -1,6 +1,6 @@
-# main.py — Camada de Integração + Webhook Hotmart (Ingestão Real Mínima)
+# main.py — Camada de Integração + Webhooks Hotmart e EDUZZ (Ingestão Real Mínima)
 # Sequencial ao Plano Diretor
-# Escopo: ingestão real Hotmart → Supabase
+# Escopo: ingestão real mínima → Supabase
 # Sem decisão • Sem Robo • Sem dashboard
 
 import os
@@ -17,7 +17,9 @@ from supabase import create_client, Client
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+
 HOTMART_WEBHOOK_SECRET = os.getenv("HOTMART_WEBHOOK_SECRET")
+EDUZZ_WEBHOOK_SECRET = os.getenv("EDUZZ_WEBHOOK_SECRET")
 
 if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
     raise RuntimeError("Variáveis SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY são obrigatórias")
@@ -28,7 +30,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 # APP
 # =====================================================
 
-app = FastAPI(title="Robo Global AI — Ingestão Hotmart")
+app = FastAPI(title="Robo Global AI — Ingestão Real Mínima")
 
 app.add_middleware(
     CORSMiddleware,
@@ -38,21 +40,18 @@ app.add_middleware(
 )
 
 # =====================================================
-# FUNÇÃO DE VALIDAÇÃO HOTMART (HMAC)
+# VALIDAÇÕES DE ASSINATURA
 # =====================================================
 
-def validar_hotmart_assinatura(body: bytes, assinatura: str) -> bool:
-    if not HOTMART_WEBHOOK_SECRET:
+def validar_hmac_sha256(secret: str, body: bytes, assinatura: str) -> bool:
+    if not secret:
         return True  # modo permissivo se secret não estiver definido
-    digest = hmac.new(
-        HOTMART_WEBHOOK_SECRET.encode(),
-        body,
-        hashlib.sha256
-    ).hexdigest()
+    digest = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
     return hmac.compare_digest(digest, assinatura)
 
+
 # =====================================================
-# WEBHOOK HOTMART — INGESTÃO REAL
+# WEBHOOK HOTMART
 # =====================================================
 
 @app.post("/webhook/hotmart")
@@ -60,7 +59,7 @@ async def webhook_hotmart(request: Request):
     raw_body = await request.body()
     assinatura = request.headers.get("X-Hotmart-Hmac-SHA256", "")
 
-    if not validar_hotmart_assinatura(raw_body, assinatura):
+    if not validar_hmac_sha256(HOTMART_WEBHOOK_SECRET, raw_body, assinatura):
         raise HTTPException(status_code=401, detail="Assinatura Hotmart inválida")
 
     try:
@@ -74,19 +73,42 @@ async def webhook_hotmart(request: Request):
         "hash_evento": payload.get("event", f"hotmart_{datetime.utcnow().isoformat()}"),
     }
 
-    try:
-        result = supabase.table("eventos_afiliados_brutos").insert(registro).execute()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
+    result = supabase.table("eventos_afiliados_brutos").insert(registro).execute()
     if not result.data:
         raise HTTPException(status_code=500, detail="Falha ao persistir evento Hotmart")
 
-    return {
-        "status": "ok",
-        "mensagem": "Evento Hotmart recebido e persistido",
-        "registro_id": result.data[0].get("id")
+    return {"status": "ok", "origem": "hotmart"}
+
+
+# =====================================================
+# WEBHOOK EDUZZ — INGESTÃO REAL MÍNIMA
+# =====================================================
+
+@app.post("/webhook/eduzz")
+async def webhook_eduzz(request: Request):
+    raw_body = await request.body()
+    assinatura = request.headers.get("X-Eduzz-Signature", "")
+
+    if not validar_hmac_sha256(EDUZZ_WEBHOOK_SECRET, raw_body, assinatura):
+        raise HTTPException(status_code=401, detail="Assinatura Eduzz inválida")
+
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Payload JSON inválido")
+
+    registro = {
+        "plataforma_origem": "eduzz",
+        "payload_original": payload,
+        "hash_evento": payload.get("event", f"eduzz_{datetime.utcnow().isoformat()}"),
     }
+
+    result = supabase.table("eventos_afiliados_brutos").insert(registro).execute()
+    if not result.data:
+        raise HTTPException(status_code=500, detail="Falha ao persistir evento Eduzz")
+
+    return {"status": "ok", "origem": "eduzz"}
+
 
 # =====================================================
 # STATUS HUMANO
@@ -95,7 +117,7 @@ async def webhook_hotmart(request: Request):
 @app.get("/status")
 def status():
     return {
-        "servico": "Robo Global AI — Webhook Hotmart",
+        "servico": "Robo Global AI — Ingestão Real Mínima (Hotmart + Eduzz)",
         "estado": "ativo",
         "timestamp": datetime.utcnow().isoformat()
     }
