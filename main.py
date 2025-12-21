@@ -1,11 +1,11 @@
-# main.py — Camada de Análise e Consolidação HUMANA
+# main.py — Camada de Execução CONTROLADA (Modo Manual)
 # Sequencial ao Plano Diretor
-# Escopo: tornar decisões e eventos interpretáveis para humanos
-# Sem execução • Sem escala • Sem Robo • Sem dashboard complexo
+# Escopo: executar ações somente sob comando humano explícito
+# Sem autonomia • Sem escala • Com registro total
 
 import os
 from datetime import datetime
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client, Client
 
@@ -25,7 +25,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 # APP
 # =====================================================
 
-app = FastAPI(title="Robo Global AI — Análise e Consolidação Humana")
+app = FastAPI(title="Robo Global AI — Execução Controlada Manual")
 
 app.add_middleware(
     CORSMiddleware,
@@ -35,63 +35,65 @@ app.add_middleware(
 )
 
 # =====================================================
-# FUNÇÕES DE CONSOLIDAÇÃO HUMANA
+# EXECUÇÃO CONTROLADA
 # =====================================================
 
-def consolidar_eventos():
-    eventos = supabase.table("eventos_afiliados_normalizados") \
-        .select("plataforma, tipo_evento, valor") \
-        .execute()
-
-    total_eventos = len(eventos.data)
-    total_valor = sum(e.get("valor") or 0 for e in eventos.data)
-
-    por_plataforma = {}
-    for e in eventos.data:
-        plat = e.get("plataforma")
-        por_plataforma.setdefault(plat, {"quantidade": 0, "valor": 0})
-        por_plataforma[plat]["quantidade"] += 1
-        por_plataforma[plat]["valor"] += e.get("valor") or 0
-
+def executar_acao(decisao: dict) -> dict:
+    """
+    Execução manual controlada.
+    Aqui a ação é apenas registrada (stub),
+    sem integração externa automática.
+    """
     return {
-        "total_eventos": total_eventos,
-        "total_valor": total_valor,
-        "por_plataforma": por_plataforma,
+        "decisao_id": decisao["id"],
+        "acao_executada": "registrada_manual",
+        "resultado": "ok",
+        "executado_em": datetime.utcnow().isoformat()
     }
 
-def consolidar_decisoes():
-    decisoes = supabase.table("eventos_decisoes_observacao") \
-        .select("decisao") \
+# =====================================================
+# ENDPOINT MANUAL DE EXECUÇÃO
+# =====================================================
+
+@app.post("/execucao/manual/{decisao_id}")
+def executar_manual(decisao_id: str):
+    # Buscar decisão
+    decisao = supabase.table("eventos_decisoes_observacao") \
+        .select("*") \
+        .eq("id", decisao_id) \
         .execute()
 
-    resumo = {}
-    for d in decisoes.data:
-        chave = d.get("decisao")
-        resumo[chave] = resumo.get(chave, 0) + 1
+    if not decisao.data:
+        raise HTTPException(status_code=404, detail="Decisão não encontrada")
 
-    return resumo
+    decisao = decisao.data[0]
 
-# =====================================================
-# ENDPOINTS HUMANOS (INTERPRETÁVEIS)
-# =====================================================
+    # Executar ação (controlada)
+    resultado = executar_acao(decisao)
 
-@app.get("/analise/resumo")
-def resumo_humano():
-    eventos = consolidar_eventos()
-    decisoes = consolidar_decisoes()
+    # Registrar execução
+    supabase.table("eventos_execucoes_manuais").insert({
+        "decisao_id": decisao_id,
+        "acao": resultado["acao_executada"],
+        "resultado": resultado["resultado"],
+        "executado_em": resultado["executado_em"]
+    }).execute()
 
     return {
         "status": "ok",
-        "resumo_eventos": eventos,
-        "resumo_decisoes": decisoes,
-        "gerado_em": datetime.utcnow().isoformat(),
-        "interpretacao": "Visão consolidada para análise humana"
+        "mensagem": "Ação executada manualmente",
+        "resultado": resultado
     }
+
+# =====================================================
+# STATUS HUMANO
+# =====================================================
 
 @app.get("/status")
 def status():
     return {
-        "servico": "Robo Global AI — Análise Humana",
+        "servico": "Robo Global AI — Execução Controlada",
         "estado": "ativo",
+        "modo": "manual",
         "timestamp": datetime.utcnow().isoformat()
     }
