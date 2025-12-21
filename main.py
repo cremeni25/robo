@@ -1,16 +1,16 @@
-# main.py — Camada de AUTONOMIA PLENA COM TRAVAS GLOBAIS
-# Sequencial ao Plano Diretor
-# Escopo: execução automática baseada em propostas APROVADAS
-# Com travas globais • Kill-switch • Rollback • Auditoria total
+# main.py — Camada de VISUALIZAÇÃO OPERACIONAL HUMANA (MÍNIMA)
+# Plano Diretor — requisito obrigatório
+# Escopo: VISÃO REAL do estado do Robo para o humano
+# Leitura direta • Linguagem humana • Sem logs técnicos • Sem gráficos
 
 import os
 from datetime import datetime
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from supabase import create_client, Client
 
 # =====================================================
-# CONFIGURAÇÃO GLOBAL (TRAVAS)
+# CONFIGURAÇÃO
 # =====================================================
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -18,8 +18,8 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
 CAPITAL_MAXIMO = float(os.getenv("CAPITAL_MAXIMO", "300"))
 RISCO_MAXIMO = float(os.getenv("RISCO_MAXIMO", "40"))
-
 AUTONOMIA_ATIVA = os.getenv("AUTONOMIA_ATIVA", "false").lower() == "true"
+ESCALA_ATIVA = os.getenv("ESCALA_ATIVA", "false").lower() == "true"
 KILL_SWITCH = os.getenv("KILL_SWITCH", "false").lower() == "true"
 
 if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
@@ -31,7 +31,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 # APP
 # =====================================================
 
-app = FastAPI(title="Robo Global AI — Autonomia Plena com Travas")
+app = FastAPI(title="Robo Global AI — Painel Operacional Humano")
 
 app.add_middleware(
     CORSMiddleware,
@@ -41,133 +41,73 @@ app.add_middleware(
 )
 
 # =====================================================
-# FUNÇÕES DE CONTROLE GLOBAL
+# FUNÇÕES DE LEITURA HUMANA
 # =====================================================
 
-def checar_travas_globais() -> None:
+def contar(tabela: str) -> int:
+    r = supabase.table(tabela).select("id", count="exact").execute()
+    return r.count or 0
+
+def soma(tabela: str, campo: str) -> float:
+    r = supabase.table(tabela).select(campo).execute()
+    return sum(x.get(campo) or 0 for x in r.data)
+
+# =====================================================
+# PAINEL OPERACIONAL — VISÃO GERAL
+# =====================================================
+
+@app.get("/painel/operacional")
+def painel_operacional():
+    eventos_brutos = contar("eventos_afiliados_brutos")
+    eventos_normalizados = contar("eventos_afiliados_normalizados")
+    decisoes = contar("eventos_decisoes_observacao")
+    execucoes_auto = contar("eventos_execucoes_automaticas")
+    execucoes_man = contar("eventos_execucoes_manuais")
+
+    capital_utilizado = soma("eventos_execucoes_automaticas", "valor")
+    capital_disponivel = max(CAPITAL_MAXIMO - capital_utilizado, 0)
+
+    estado = "OK"
     if KILL_SWITCH:
-        raise HTTPException(status_code=403, detail="Kill-switch ativo — operações bloqueadas")
-    if not AUTONOMIA_ATIVA:
-        raise HTTPException(status_code=403, detail="Autonomia plena desativada")
+        estado = "PAUSADO"
+    elif capital_disponivel <= 0:
+        estado = "ALERTA"
 
-def capital_disponivel() -> float:
-    execs = supabase.table("eventos_execucoes_automaticas") \
-        .select("valor") \
-        .execute()
-    utilizado = sum(e.get("valor") or 0 for e in execs.data)
-    return max(CAPITAL_MAXIMO - utilizado, 0)
-
-# =====================================================
-# EXECUÇÃO BASEADA EM PROPOSTAS APROVADAS
-# =====================================================
-
-def executar_proposta_aprovada(proposta: dict) -> dict:
-    """
-    Executa ajuste ou ação APENAS se proposta estiver aprovada.
-    """
     return {
-        "proposta_id": proposta["id"],
-        "acao": "ajuste_aplicado",
-        "resultado": "ok",
-        "executado_em": datetime.utcnow().isoformat()
+        "estado_geral": estado,
+        "ciclo_atual": "OPERACIONAL CONTÍNUO",
+        "eventos": {
+            "brutos": eventos_brutos,
+            "normalizados": eventos_normalizados
+        },
+        "decisoes_registradas": decisoes,
+        "execucoes": {
+            "automaticas": execucoes_auto,
+            "manuais": execucoes_man
+        },
+        "capital": {
+            "maximo": CAPITAL_MAXIMO,
+            "utilizado": capital_utilizado,
+            "disponivel": capital_disponivel
+        },
+        "travas": {
+            "autonomia_ativa": AUTONOMIA_ATIVA,
+            "escala_ativa": ESCALA_ATIVA,
+            "kill_switch": KILL_SWITCH,
+            "risco_maximo": RISCO_MAXIMO
+        },
+        "ultima_atualizacao": datetime.utcnow().isoformat()
     }
 
 # =====================================================
-# CICLO DE AUTONOMIA PLENA (CURTO)
-# =====================================================
-
-@app.post("/autonomia/ciclo")
-def ciclo_autonomia():
-    checar_travas_globais()
-
-    propostas = supabase.table("eventos_propostas_autonomia") \
-        .select("*") \
-        .eq("status", "aprovada") \
-        .eq("executada", False) \
-        .limit(5) \
-        .execute()
-
-    executadas = []
-
-    for proposta in propostas.data:
-        if capital_disponivel() <= 0:
-            break
-
-        resultado = executar_proposta_aprovada(proposta)
-
-        supabase.table("eventos_execucoes_autonomia") \
-            .insert({
-                "proposta_id": proposta["id"],
-                "acao": resultado["acao"],
-                "resultado": resultado["resultado"],
-                "executado_em": resultado["executado_em"]
-            }).execute()
-
-        supabase.table("eventos_propostas_autonomia") \
-            .update({"executada": True}) \
-            .eq("id", proposta["id"]) \
-            .execute()
-
-        executadas.append(resultado)
-
-    return {
-        "status": "ok",
-        "propostas_executadas": len(executadas),
-        "capital_restante": capital_disponivel(),
-        "timestamp": datetime.utcnow().isoformat()
-    }
-
-# =====================================================
-# CONTROLES DE EMERGÊNCIA
-# =====================================================
-
-@app.post("/controle/kill-switch")
-def ativar_kill_switch():
-    return {
-        "status": "ok",
-        "kill_switch": "ativado",
-        "observacao": "Defina KILL_SWITCH=true no ambiente para efetivar"
-    }
-
-@app.post("/controle/rollback/{proposta_id}")
-def rollback(proposta_id: str):
-    """
-    Rollback lógico: marca execução como revertida.
-    """
-    execucao = supabase.table("eventos_execucoes_autonomia") \
-        .select("*") \
-        .eq("proposta_id", proposta_id) \
-        .execute()
-
-    if not execucao.data:
-        raise HTTPException(status_code=404, detail="Execução não encontrada")
-
-    supabase.table("eventos_execucoes_autonomia") \
-        .update({
-            "resultado": "revertido",
-            "revertido_em": datetime.utcnow().isoformat()
-        }) \
-        .eq("proposta_id", proposta_id) \
-        .execute()
-
-    return {
-        "status": "ok",
-        "proposta_id": proposta_id,
-        "rollback": "executado"
-    }
-
-# =====================================================
-# STATUS HUMANO
+# STATUS SIMPLES (CHECK RÁPIDO)
 # =====================================================
 
 @app.get("/status")
 def status():
     return {
-        "servico": "Robo Global AI — Autonomia Plena",
+        "robo": "Robo Global AI",
         "estado": "ativo",
-        "autonomia_ativa": AUTONOMIA_ATIVA,
-        "kill_switch": KILL_SWITCH,
-        "capital_maximo": CAPITAL_MAXIMO,
-        "risco_maximo": RISCO_MAXIMO,
+        "painel": "operacional_humano",
         "timestamp": datetime.utcnow().isoformat()
     }
