@@ -1,7 +1,7 @@
-# main.py — Camada de Decisão Econômica MÍNIMA (Modo Observação)
+# main.py — Camada de Análise e Consolidação HUMANA
 # Sequencial ao Plano Diretor
-# Escopo: leitura de eventos normalizados → decisão registrada
-# Sem execução • Sem escala • Sem Robo • Sem dashboard
+# Escopo: tornar decisões e eventos interpretáveis para humanos
+# Sem execução • Sem escala • Sem Robo • Sem dashboard complexo
 
 import os
 from datetime import datetime
@@ -25,7 +25,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 # APP
 # =====================================================
 
-app = FastAPI(title="Robo Global AI — Decisão Econômica Mínima (Observação)")
+app = FastAPI(title="Robo Global AI — Análise e Consolidação Humana")
 
 app.add_middleware(
     CORSMiddleware,
@@ -35,83 +35,63 @@ app.add_middleware(
 )
 
 # =====================================================
-# LÓGICA DE DECISÃO MÍNIMA
+# FUNÇÕES DE CONSOLIDAÇÃO HUMANA
 # =====================================================
 
-def decidir_evento(evento: dict) -> dict:
-    """
-    Decisão econômica mínima (modo observação):
-    Não executa ações — apenas classifica.
-    """
-    valor = evento.get("valor")
-    tipo = evento.get("tipo_evento")
-    plataforma = evento.get("plataforma")
-
-    if tipo in ["PURCHASE_APPROVED", "approved", "sale"] and valor:
-        decisao = "observar_receita"
-    elif tipo in ["refund", "chargeback", "canceled"]:
-        decisao = "observar_risco"
-    else:
-        decisao = "ignorar"
-
-    return {
-        "plataforma": plataforma,
-        "tipo_evento": tipo,
-        "valor": valor,
-        "decisao": decisao,
-        "referencia": evento.get("referencia"),
-        "criado_em": datetime.utcnow().isoformat(),
-    }
-
-def processar_decisoes():
-    """
-    Lê eventos normalizados ainda não avaliados
-    e registra decisão econômica mínima.
-    """
+def consolidar_eventos():
     eventos = supabase.table("eventos_afiliados_normalizados") \
-        .select("*") \
-        .eq("avaliado", False) \
-        .limit(50) \
+        .select("plataforma, tipo_evento, valor") \
         .execute()
 
-    if not eventos.data:
-        return 0
+    total_eventos = len(eventos.data)
+    total_valor = sum(e.get("valor") or 0 for e in eventos.data)
 
-    for evento in eventos.data:
-        decisao = decidir_evento(evento)
+    por_plataforma = {}
+    for e in eventos.data:
+        plat = e.get("plataforma")
+        por_plataforma.setdefault(plat, {"quantidade": 0, "valor": 0})
+        por_plataforma[plat]["quantidade"] += 1
+        por_plataforma[plat]["valor"] += e.get("valor") or 0
 
-        supabase.table("eventos_decisoes_observacao").insert(decisao).execute()
-
-        supabase.table("eventos_afiliados_normalizados") \
-            .update({"avaliado": True}) \
-            .eq("id", evento["id"]) \
-            .execute()
-
-    return len(eventos.data)
-
-# =====================================================
-# ENDPOINT DE CICLO (HUMANO / MANUAL)
-# =====================================================
-
-@app.post("/ciclo/decisao")
-def ciclo_decisao():
-    quantidade = processar_decisoes()
     return {
-        "status": "ok",
-        "eventos_processados": quantidade,
-        "modo": "observacao",
-        "timestamp": datetime.utcnow().isoformat()
+        "total_eventos": total_eventos,
+        "total_valor": total_valor,
+        "por_plataforma": por_plataforma,
     }
 
+def consolidar_decisoes():
+    decisoes = supabase.table("eventos_decisoes_observacao") \
+        .select("decisao") \
+        .execute()
+
+    resumo = {}
+    for d in decisoes.data:
+        chave = d.get("decisao")
+        resumo[chave] = resumo.get(chave, 0) + 1
+
+    return resumo
+
 # =====================================================
-# STATUS HUMANO
+# ENDPOINTS HUMANOS (INTERPRETÁVEIS)
 # =====================================================
+
+@app.get("/analise/resumo")
+def resumo_humano():
+    eventos = consolidar_eventos()
+    decisoes = consolidar_decisoes()
+
+    return {
+        "status": "ok",
+        "resumo_eventos": eventos,
+        "resumo_decisoes": decisoes,
+        "gerado_em": datetime.utcnow().isoformat(),
+        "interpretacao": "Visão consolidada para análise humana"
+    }
 
 @app.get("/status")
 def status():
     return {
-        "servico": "Robo Global AI — Decisão Econômica Mínima",
+        "servico": "Robo Global AI — Análise Humana",
         "estado": "ativo",
-        "modo": "observacao",
         "timestamp": datetime.utcnow().isoformat()
     }
