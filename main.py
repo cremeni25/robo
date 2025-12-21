@@ -1,7 +1,7 @@
 # main.py — versão completa e final
 # ROBO GLOBAL AI — Backend Operacional
-# Correção definitiva de schema: valor_unitário ➜ valor_unitario
-# Nenhuma outra alteração realizada
+# Schema alinhado: valor_unitario + created_at
+# Painel operacional definitivo
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,7 +13,7 @@ from supabase import create_client
 # APP
 # =====================================================
 
-app = FastAPI(title="ROBO GLOBAL AI", version="2.2")
+app = FastAPI(title="ROBO GLOBAL AI", version="2.3")
 
 # =====================================================
 # CORS
@@ -138,7 +138,7 @@ def resultado():
     return {"resultado_total": round(total, 4)}
 
 # =====================================================
-# PAINEL OPERACIONAL (ALINHADO AO SCHEMA REAL)
+# PAINEL OPERACIONAL — DEFINITIVO
 # =====================================================
 
 @app.get("/painel/operacional")
