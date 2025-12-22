@@ -1,95 +1,205 @@
-# main.py — Robô Global AI
-# Versão com Fase 1.4 (Hipótese Inicial Controlada)
-# Arquivo VITAL — substituição total obrigatória
+# main.py — ROBO GLOBAL AI
+# ESTADO DECISÓRIO • IMPLEMENTAÇÃO FORMAL • AUTORIDADE SOBERANA
+# -------------------------------------------------------------
+# Este arquivo implementa o Estado Decisório como entidade
+# persistente, explicável e bloqueadora de ações.
+# Nenhuma ação do sistema pode ocorrer sem validação do Estado.
+# -------------------------------------------------------------
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, HTTPException
+from enum import Enum
 from datetime import datetime
-import os
-
-from hypotheses import gerar_hipoteses
-
-# =====================================================
-# APP
-# =====================================================
-
-app = FastAPI(
-    title="Robô Global AI",
-    version="1.4.0",
-    description="Motor de observabilidade, hipóteses e execução controlada"
-)
+from typing import List, Dict, Optional
+import uuid
 
 # =====================================================
-# CORS — Dashboard oficial (GitHub Pages)
+# ENUMERAÇÕES FORMALIZADAS
 # =====================================================
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+class EstadoEnum(str, Enum):
+    OBSERVACAO = "OBSERVACAO"
+    ANALISE = "ANALISE"
+    EXECUCAO = "EXECUCAO"
+    AGUARDANDO_VALIDACAO = "AGUARDANDO_VALIDACAO"
+    BLOQUEADO = "BLOQUEADO"
+
+
+class ClasseAcao(str, Enum):
+    CAPTAR = "CAPTAR"
+    INVESTIR = "INVESTIR"
+    ESCALAR = "ESCALAR"
+    PAUSAR = "PAUSAR"
+    RECUAR = "RECUAR"
+    DESCARTAR = "DESCARTAR"
+    REPROCESSAR = "REPROCESSAR"
+
 
 # =====================================================
-# ESTADO GLOBAL DO ROBÔ (CONTROLADO)
+# MATRIZ DE PERMISSÕES (REGRA DURA)
 # =====================================================
 
-ROBO_STATE = {
-    "status": "ATIVO",
-    "motivo": "Observabilidade ativa — hipóteses permitidas",
-    "fase_atual": "1.4",
-    "ultima_atualizacao": datetime.utcnow().isoformat()
+PERMISSOES_POR_ESTADO: Dict[EstadoEnum, List[ClasseAcao]] = {
+    EstadoEnum.OBSERVACAO: [ClasseAcao.CAPTAR],
+    EstadoEnum.ANALISE: [ClasseAcao.CAPTAR, ClasseAcao.DESCARTAR],
+    EstadoEnum.EXECUCAO: [ClasseAcao.INVESTIR],
+    EstadoEnum.AGUARDANDO_VALIDACAO: [],
+    EstadoEnum.BLOQUEADO: []
 }
 
 # =====================================================
-# ENDPOINT — STATUS EXECUTIVO (Dashboard)
+# ESTADO DECISÓRIO (ENTIDADE SOBERANA)
 # =====================================================
 
-@app.get("/status")
-def status_robo():
+class EstadoDecisorio:
+    def __init__(self):
+        self.estado_id: str = str(uuid.uuid4())
+        self.versao_estado: int = 1
+
+        self.estado_atual: EstadoEnum = EstadoEnum.OBSERVACAO
+        self.subestado: Optional[str] = None
+
+        self.objetivo_ativo: Optional[str] = None
+        self.restricoes_ativas: List[str] = []
+        self.riscos_assumidos: Optional[str] = None
+        self.capital_exposto: float = 0.0
+        self.plataformas_permitidas: List[str] = []
+
+        self.justificativa_humana_atual: str = (
+            "O Robô iniciou em estado de OBSERVAÇÃO. "
+            "Neste estado, ele apenas coleta informações e não executa investimentos."
+        )
+
+        self.historico_decisorio_resumido: List[Dict] = []
+
+        self._registrar_historico("Estado inicial criado")
+
+    # -------------------------------------------------
+    # MÉTODOS DE LEITURA
+    # -------------------------------------------------
+
+    def obter_estado_atual(self) -> EstadoEnum:
+        return self.estado_atual
+
+    def obter_acoes_permitidas(self) -> List[ClasseAcao]:
+        return PERMISSOES_POR_ESTADO[self.estado_atual]
+
+    def obter_restricoes(self) -> List[str]:
+        return self.restricoes_ativas
+
+    def obter_explicacao_humana(self) -> str:
+        return self.justificativa_humana_atual
+
+    # -------------------------------------------------
+    # VALIDAÇÕES
+    # -------------------------------------------------
+
+    def acao_eh_permitida(self, acao: ClasseAcao) -> bool:
+        return acao in self.obter_acoes_permitidas()
+
+    def transicao_eh_valida(self, novo_estado: EstadoEnum) -> bool:
+        if self.estado_atual == EstadoEnum.BLOQUEADO:
+            return False
+        return True
+
+    # -------------------------------------------------
+    # TRANSIÇÕES DE ESTADO
+    # -------------------------------------------------
+
+    def solicitar_transicao(self, novo_estado: EstadoEnum, motivo: str):
+        if not self.transicao_eh_valida(novo_estado):
+            raise ValueError("Transição de estado não permitida")
+
+        self.estado_atual = novo_estado
+        self.versao_estado += 1
+
+        self.justificativa_humana_atual = (
+            f"O Robô entrou no estado {novo_estado.value} pelo seguinte motivo: {motivo}"
+        )
+
+        self._registrar_historico(motivo)
+
+    # -------------------------------------------------
+    # HISTÓRICO HUMANO
+    # -------------------------------------------------
+
+    def _registrar_historico(self, motivo: str):
+        self.historico_decisorio_resumido.append({
+            "data": datetime.utcnow().isoformat(),
+            "estado": self.estado_atual.value,
+            "motivo": motivo
+        })
+
+
+# =====================================================
+# INSTÂNCIA ÚNICA DO ESTADO (FONTE DA VERDADE)
+# =====================================================
+
+ESTADO_DECISORIO = EstadoDecisorio()
+
+# =====================================================
+# FASTAPI
+# =====================================================
+
+app = FastAPI(
+    title="Robo Global AI — Estado Decisório",
+    description="Implementação formal do Estado Decisório soberano",
+    version="1.0.0"
+)
+
+# =====================================================
+# ENDPOINTS OPERACIONAIS DO ESTADO
+# =====================================================
+
+@app.get("/estado")
+def obter_estado():
     return {
-        "robo": ROBO_STATE,
-        "timestamp": datetime.utcnow().isoformat()
+        "estado_id": ESTADO_DECISORIO.estado_id,
+        "versao": ESTADO_DECISORIO.versao_estado,
+        "estado_atual": ESTADO_DECISORIO.estado_atual,
+        "acoes_permitidas": ESTADO_DECISORIO.obter_acoes_permitidas(),
+        "explicacao_humana": ESTADO_DECISORIO.obter_explicacao_humana()
     }
 
-# =====================================================
-# ENDPOINT — HIPÓTESES (FASE 1.4)
-# =====================================================
 
-@app.get("/hipoteses")
-def listar_hipoteses():
-    hipoteses = gerar_hipoteses()
+@app.post("/estado/acao/{acao}")
+def solicitar_acao(acao: ClasseAcao):
+    if not ESTADO_DECISORIO.acao_eh_permitida(acao):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "mensagem": "Ação bloqueada pelo Estado Decisório",
+                "estado_atual": ESTADO_DECISORIO.estado_atual,
+                "explicacao": ESTADO_DECISORIO.obter_explicacao_humana()
+            }
+        )
 
     return {
-        "fase": "1.4",
-        "status": "HIPOTESES_GERADAS",
-        "total": len(hipoteses),
-        "hipoteses": hipoteses,
-        "timestamp": datetime.utcnow().isoformat()
+        "mensagem": f"Ação {acao.value} permitida pelo Estado Decisório",
+        "estado_atual": ESTADO_DECISORIO.estado_atual
     }
 
-# =====================================================
-# ENDPOINT — EXECUTAR AUTOMAÇÃO (BLOQUEADO POR PROTOCOLO)
-# =====================================================
 
-@app.post("/executar")
-def executar_automacao():
+@app.post("/estado/transicao/{novo_estado}")
+def solicitar_transicao(novo_estado: EstadoEnum, motivo: str):
+    try:
+        ESTADO_DECISORIO.solicitar_transicao(novo_estado, motivo)
+    except ValueError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+
     return {
-        "status": "BLOQUEADO",
-        "motivo": "Nenhuma proposta executável aprovada",
-        "timestamp": datetime.utcnow().isoformat()
+        "mensagem": "Transição realizada com sucesso",
+        "novo_estado": ESTADO_DECISORIO.estado_atual,
+        "explicacao_humana": ESTADO_DECISORIO.obter_explicacao_humana()
     }
 
-# =====================================================
-# ENDPOINT — ROOT (SANIDADE)
-# =====================================================
 
-@app.get("/")
-def root():
+@app.get("/estado/explicacao")
+def explicacao_humana():
     return {
-        "robo": "GLOBAL AI",
-        "estado": ROBO_STATE["status"],
-        "fase": ROBO_STATE["fase_atual"],
-        "mensagem": "Sistema ativo — observabilidade e hipóteses habilitadas"
+        "explicacao_humana": ESTADO_DECISORIO.obter_explicacao_humana(),
+        "historico": ESTADO_DECISORIO.historico_decisorio_resumido
     }
+
+# -----------------------------------------------------
+# FIM DO ARQUIVO
+# -----------------------------------------------------
