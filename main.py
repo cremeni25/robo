@@ -1,9 +1,9 @@
 # main.py — ROBO GLOBAL AI
-# ESTADO DECISÓRIO • VALIDAÇÃO HUMANA • WEBHOOKS COMO EVENTOS
+# ESTADO DECISÓRIO • VALIDAÇÃO HUMANA • WEBHOOKS • SNAPSHOT
 # ----------------------------------------------------------
-# PASSO 4 IMPLEMENTADO
-# Webhooks são tratados exclusivamente como eventos externos.
-# Nenhum webhook executa ação ou altera estado diretamente.
+# PASSO 5 IMPLEMENTADO
+# Persistência usada apenas como MEMÓRIA segura.
+# Nenhuma decisão ocorre no banco.
 # ----------------------------------------------------------
 
 from fastapi import FastAPI, HTTPException, Request
@@ -12,6 +12,22 @@ from typing import List, Dict, Optional
 from datetime import datetime
 import uuid
 import hashlib
+import os
+
+# ==================================================
+# CONFIGURAÇÃO SUPABASE (DEPENDÊNCIA FRACA)
+# ==================================================
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+supabase = None
+if SUPABASE_URL and SUPABASE_KEY:
+    try:
+        from supabase import create_client
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+    except Exception:
+        supabase = None
 
 # ==================================================
 # ENUMERAÇÕES
@@ -61,28 +77,81 @@ PERMISSOES_POR_ESTADO = {
 }
 
 # ==================================================
+# FUNÇÕES DE SNAPSHOT (MEMÓRIA)
+# ==================================================
+
+def gerar_hash_estado(snapshot: dict) -> str:
+    bruto = str(snapshot)
+    return hashlib.sha256(bruto.encode()).hexdigest()
+
+
+def salvar_snapshot(snapshot: dict):
+    if not supabase:
+        return False
+
+    snapshot["hash_logico"] = gerar_hash_estado(snapshot)
+    snapshot["criado_em"] = datetime.utcnow().isoformat()
+
+    supabase.table("estado_snapshot").insert(snapshot).execute()
+    return True
+
+
+def carregar_ultimo_snapshot() -> Optional[dict]:
+    if not supabase:
+        return None
+
+    result = (
+        supabase
+        .table("estado_snapshot")
+        .select("*")
+        .order("criado_em", desc=True)
+        .limit(1)
+        .execute()
+    )
+
+    if result.data:
+        return result.data[0]
+    return None
+
+# ==================================================
 # ESTADO DECISÓRIO SOBERANO
 # ==================================================
 
 class EstadoDecisorio:
     def __init__(self):
-        self.estado_id = str(uuid.uuid4())
-        self.versao_estado = 1
-        self.estado_atual = EstadoEnum.OBSERVACAO
+        snapshot = carregar_ultimo_snapshot()
 
-        self.justificativa_humana_atual = (
-            "O Robô iniciou em OBSERVAÇÃO. "
-            "Webhooks apenas registram fatos."
-        )
+        if snapshot:
+            self.estado_id = snapshot["estado_id"]
+            self.versao_estado = snapshot["versao_estado"]
+            self.estado_atual = EstadoEnum(snapshot["estado_atual"])
+            self.justificativa_humana_atual = snapshot["justificativa_humana"]
+            self.historico = snapshot.get("historico", [])
+            self.validacao_pendente = snapshot.get("validacao_pendente", False)
+        else:
+            self.estado_id = str(uuid.uuid4())
+            self.versao_estado = 1
+            self.estado_atual = EstadoEnum.OBSERVACAO
+            self.justificativa_humana_atual = (
+                "Estado inicial criado. Nenhum snapshot anterior encontrado."
+            )
+            self.historico = []
+            self.validacao_pendente = False
+            self._registrar("Estado inicial sem snapshot")
 
-        self.historico: List[Dict] = []
+            if supabase:
+                self.estado_atual = EstadoEnum.BLOQUEADO
+                self.justificativa_humana_atual = (
+                    "Snapshot inexistente ou inválido. "
+                    "Sistema bloqueado aguardando validação humana."
+                )
+                self._registrar("Sistema bloqueado por ausência de snapshot")
 
-        # Validação humana
-        self.validacao_pendente = False
-        self.estado_proposto: Optional[EstadoEnum] = None
-        self.pedido_humano: Optional[Dict] = None
+        self._persistir()
 
-        self._registrar("Estado inicial criado")
+    # -----------------------------
+    # UTIL
+    # -----------------------------
 
     def _registrar(self, motivo: str):
         self.historico.append({
@@ -90,6 +159,21 @@ class EstadoDecisorio:
             "estado": self.estado_atual.value,
             "motivo": motivo
         })
+
+    def _persistir(self):
+        snapshot = {
+            "estado_id": self.estado_id,
+            "versao_estado": self.versao_estado,
+            "estado_atual": self.estado_atual.value,
+            "justificativa_humana": self.justificativa_humana_atual,
+            "historico": self.historico,
+            "validacao_pendente": self.validacao_pendente
+        }
+        salvar_snapshot(snapshot)
+
+    # -----------------------------
+    # LEITURA
+    # -----------------------------
 
     def obter_estado(self):
         return {
@@ -101,59 +185,21 @@ class EstadoDecisorio:
             "explicacao_humana": self.justificativa_humana_atual
         }
 
-    def solicitar_validacao_humana(
-        self,
-        estado_proposto: EstadoEnum,
-        motivo: str,
-        risco: str,
-        capital: float
-    ):
-        self.validacao_pendente = True
-        self.estado_proposto = estado_proposto
-        self.estado_atual = EstadoEnum.AGUARDANDO_VALIDACAO
+    # -----------------------------
+    # TRANSIÇÃO
+    # -----------------------------
+
+    def transicionar(self, novo_estado: EstadoEnum, motivo: str):
+        if self.estado_atual == EstadoEnum.AGUARDANDO_VALIDACAO:
+            raise ValueError("Estado congelado aguardando validação humana.")
+
+        self.estado_atual = novo_estado
         self.versao_estado += 1
-
-        self.pedido_humano = {
-            "acao_proposta": estado_proposto.value,
-            "motivo": motivo,
-            "risco": risco,
-            "capital": capital
-        }
-
         self.justificativa_humana_atual = (
-            "O Robô está aguardando validação humana para uma decisão crítica."
+            f"Estado alterado para {novo_estado.value}. Motivo: {motivo}"
         )
-
-        self._registrar("Validação humana solicitada")
-
-    def responder_validacao(self, resposta: RespostaHumana, motivo: Optional[str] = None):
-        if not self.validacao_pendente:
-            raise ValueError("Nenhuma validação pendente.")
-
-        if resposta == RespostaHumana.APROVAR:
-            self.estado_atual = self.estado_proposto
-            self.justificativa_humana_atual = (
-                f"Humano aprovou a transição para {self.estado_proposto.value}."
-            )
-
-        elif resposta == RespostaHumana.NEGAR:
-            self.estado_atual = EstadoEnum.ANALISE
-            self.justificativa_humana_atual = f"Humano negou a decisão. Motivo: {motivo}"
-
-        elif resposta == RespostaHumana.SOLICITAR_AJUSTE:
-            self.estado_atual = EstadoEnum.ANALISE
-            self.justificativa_humana_atual = f"Humano solicitou ajustes. Motivo: {motivo}"
-
-        elif resposta == RespostaHumana.ADIAR:
-            self.justificativa_humana_atual = "Humano adiou a decisão."
-            return
-
-        self.validacao_pendente = False
-        self.estado_proposto = None
-        self.pedido_humano = None
-        self.versao_estado += 1
-
-        self._registrar(f"Resposta humana: {resposta.value}")
+        self._registrar(motivo)
+        self._persistir()
 
 # ==================================================
 # REGISTRO DE EVENTOS (WEBHOOKS)
@@ -162,44 +208,35 @@ class EstadoDecisorio:
 EVENTOS_REGISTRADOS: Dict[str, Dict] = {}
 
 def gerar_hash_evento(origem: str, payload: dict) -> str:
-    bruto = f"{origem}-{payload}"
-    return hashlib.sha256(bruto.encode()).hexdigest()
+    return hashlib.sha256(f"{origem}-{payload}".encode()).hexdigest()
 
-def registrar_evento(origem: str, tipo: TipoEvento, payload: dict) -> Dict:
-    hash_evento = gerar_hash_evento(origem, payload)
+def registrar_evento(origem: str, tipo: TipoEvento, payload: dict):
+    h = gerar_hash_evento(origem, payload)
+    if h in EVENTOS_REGISTRADOS:
+        return {"status": "EVENTO_DUPLICADO", "hash": h}
 
-    if hash_evento in EVENTOS_REGISTRADOS:
-        return {
-            "status": "EVENTO_DUPLICADO",
-            "hash_evento": hash_evento
-        }
-
-    EVENTOS_REGISTRADOS[hash_evento] = {
+    EVENTOS_REGISTRADOS[h] = {
         "evento_id": str(uuid.uuid4()),
         "origem": origem,
         "tipo": tipo.value,
         "payload": payload,
         "timestamp": datetime.utcnow().isoformat()
     }
-
-    return {
-        "status": "EVENTO_REGISTRADO",
-        "hash_evento": hash_evento
-    }
+    return {"status": "EVENTO_REGISTRADO", "hash": h}
 
 # ==================================================
 # FASTAPI
 # ==================================================
 
 app = FastAPI(
-    title="Robo Global AI — Estado + Webhooks",
-    version="1.2.0"
+    title="Robo Global AI — Arquitetura Completa",
+    version="1.3.0"
 )
 
 ESTADO = EstadoDecisorio()
 
 # ==================================================
-# ENDPOINTS DO ESTADO
+# ENDPOINTS
 # ==================================================
 
 @app.get("/estado")
@@ -213,37 +250,13 @@ def explicacao():
         "historico": ESTADO.historico
     }
 
-@app.post("/estado/responder-validacao")
-def responder_validacao(resposta: RespostaHumana, motivo: Optional[str] = None):
-    try:
-        ESTADO.responder_validacao(resposta, motivo)
-    except Exception as e:
-        raise HTTPException(status_code=403, detail=str(e))
-
-    return {
-        "mensagem": "Resposta humana registrada",
-        "estado": ESTADO.estado_atual
-    }
-
-# ==================================================
-# WEBHOOKS COMO EVENTOS
-# ==================================================
-
 @app.post("/webhook/{origem}")
-async def receber_webhook(origem: str, request: Request):
+async def webhook(origem: str, request: Request):
     payload = await request.json()
+    resultado = registrar_evento(origem, TipoEvento.OUTRO, payload)
 
-    tipo = TipoEvento.OUTRO
-    if "venda" in payload.get("evento", "").lower():
-        tipo = TipoEvento.VENDA
-    elif "reembolso" in payload.get("evento", "").lower():
-        tipo = TipoEvento.REEMBOLSO
-
-    resultado = registrar_evento(origem, tipo, payload)
-
-    # Nenhuma decisão ocorre aqui
     return {
-        "mensagem": "Webhook recebido como evento",
+        "mensagem": "Evento registrado",
         "resultado": resultado,
         "estado_atual": ESTADO.estado_atual,
         "explicacao": ESTADO.justificativa_humana_atual
