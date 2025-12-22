@@ -1,267 +1,292 @@
-# main.py — ROBO GLOBAL AI
-# ESTADO DECISÓRIO • VALIDAÇÃO HUMANA • WEBHOOKS • SNAPSHOT
-# ----------------------------------------------------------
-# PASSO 5 IMPLEMENTADO
-# Persistência usada apenas como MEMÓRIA segura.
-# Nenhuma decisão ocorre no banco.
-# ----------------------------------------------------------
+# main.py — versão completa e final
+# ROBO GLOBAL AI
+# Integração REAL Hotmart + Eduzz
+# Estado Decisório Soberano • Eventos ≠ Ações • Snapshot Imutável
+# Logs humanos no padrão: [ORIGEM] [NÍVEL] mensagem
 
-from fastapi import FastAPI, HTTPException, Request
-from enum import Enum
-from typing import List, Dict, Optional
-from datetime import datetime
-import uuid
-import hashlib
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from datetime import datetime, timezone
+from typing import Dict, Any, Optional
 import os
+import json
+import hmac
+import hashlib
+import uuid
+import threading
+import time
 
-# ==================================================
-# CONFIGURAÇÃO SUPABASE (DEPENDÊNCIA FRACA)
-# ==================================================
+from supabase import create_client, Client
+
+# =====================================================
+# CONFIGURAÇÃO BÁSICA
+# =====================================================
+
+APP_NAME = "ROBO GLOBAL AI"
+APP_VERSION = "1.0.0"
+APP_PHASE = "INTEGRACAO_REAL_HOTMART_EDUZZ"
+
+ENV = os.getenv("ENV", "production")
+INSTANCE_ID = os.getenv("INSTANCE_ID", str(uuid.uuid4()))
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
-supabase = None
-if SUPABASE_URL and SUPABASE_KEY:
-    try:
-        from supabase import create_client
-        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-    except Exception:
-        supabase = None
+HOTMART_WEBHOOK_SECRET = os.getenv("HOTMART_WEBHOOK_SECRET")
+EDUZZ_WEBHOOK_SECRET = os.getenv("EDUZZ_WEBHOOK_SECRET")
 
-# ==================================================
-# ENUMERAÇÕES
-# ==================================================
+if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+    raise RuntimeError("Supabase não configurado corretamente")
 
-class EstadoEnum(str, Enum):
-    OBSERVACAO = "OBSERVACAO"
-    ANALISE = "ANALISE"
-    EXECUCAO = "EXECUCAO"
-    AGUARDANDO_VALIDACAO = "AGUARDANDO_VALIDACAO"
-    BLOQUEADO = "BLOQUEADO"
+sb: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
-
-class ClasseAcao(str, Enum):
-    CAPTAR = "CAPTAR"
-    ANALISAR = "ANALISAR"
-    INVESTIR = "INVESTIR"
-    ESCALAR = "ESCALAR"
-    PAUSAR = "PAUSAR"
-    RECUAR = "RECUAR"
-    DESCARTAR = "DESCARTAR"
-
-
-class RespostaHumana(str, Enum):
-    APROVAR = "APROVAR"
-    NEGAR = "NEGAR"
-    SOLICITAR_AJUSTE = "SOLICITAR_AJUSTE"
-    ADIAR = "ADIAR"
-
-
-class TipoEvento(str, Enum):
-    VENDA = "VENDA"
-    REEMBOLSO = "REEMBOLSO"
-    CANCELAMENTO = "CANCELAMENTO"
-    OUTRO = "OUTRO"
-
-# ==================================================
-# MATRIZ DE PERMISSÕES
-# ==================================================
-
-PERMISSOES_POR_ESTADO = {
-    EstadoEnum.OBSERVACAO: [ClasseAcao.CAPTAR],
-    EstadoEnum.ANALISE: [ClasseAcao.CAPTAR, ClasseAcao.ANALISAR, ClasseAcao.DESCARTAR],
-    EstadoEnum.EXECUCAO: [ClasseAcao.INVESTIR],
-    EstadoEnum.AGUARDANDO_VALIDACAO: [],
-    EstadoEnum.BLOQUEADO: []
-}
-
-# ==================================================
-# FUNÇÕES DE SNAPSHOT (MEMÓRIA)
-# ==================================================
-
-def gerar_hash_estado(snapshot: dict) -> str:
-    bruto = str(snapshot)
-    return hashlib.sha256(bruto.encode()).hexdigest()
-
-
-def salvar_snapshot(snapshot: dict):
-    if not supabase:
-        return False
-
-    snapshot["hash_logico"] = gerar_hash_estado(snapshot)
-    snapshot["criado_em"] = datetime.utcnow().isoformat()
-
-    supabase.table("estado_snapshot").insert(snapshot).execute()
-    return True
-
-
-def carregar_ultimo_snapshot() -> Optional[dict]:
-    if not supabase:
-        return None
-
-    result = (
-        supabase
-        .table("estado_snapshot")
-        .select("*")
-        .order("criado_em", desc=True)
-        .limit(1)
-        .execute()
-    )
-
-    if result.data:
-        return result.data[0]
-    return None
-
-# ==================================================
-# ESTADO DECISÓRIO SOBERANO
-# ==================================================
-
-class EstadoDecisorio:
-    def __init__(self):
-        snapshot = carregar_ultimo_snapshot()
-
-        if snapshot:
-            self.estado_id = snapshot["estado_id"]
-            self.versao_estado = snapshot["versao_estado"]
-            self.estado_atual = EstadoEnum(snapshot["estado_atual"])
-            self.justificativa_humana_atual = snapshot["justificativa_humana"]
-            self.historico = snapshot.get("historico", [])
-            self.validacao_pendente = snapshot.get("validacao_pendente", False)
-        else:
-            self.estado_id = str(uuid.uuid4())
-            self.versao_estado = 1
-            self.estado_atual = EstadoEnum.OBSERVACAO
-            self.justificativa_humana_atual = (
-                "Estado inicial criado. Nenhum snapshot anterior encontrado."
-            )
-            self.historico = []
-            self.validacao_pendente = False
-            self._registrar("Estado inicial sem snapshot")
-
-            if supabase:
-                self.estado_atual = EstadoEnum.BLOQUEADO
-                self.justificativa_humana_atual = (
-                    "Snapshot inexistente ou inválido. "
-                    "Sistema bloqueado aguardando validação humana."
-                )
-                self._registrar("Sistema bloqueado por ausência de snapshot")
-
-        self._persistir()
-
-    # -----------------------------
-    # UTIL
-    # -----------------------------
-
-    def _registrar(self, motivo: str):
-        self.historico.append({
-            "timestamp": datetime.utcnow().isoformat(),
-            "estado": self.estado_atual.value,
-            "motivo": motivo
-        })
-
-    def _persistir(self):
-        snapshot = {
-            "estado_id": self.estado_id,
-            "versao_estado": self.versao_estado,
-            "estado_atual": self.estado_atual.value,
-            "justificativa_humana": self.justificativa_humana_atual,
-            "historico": self.historico,
-            "validacao_pendente": self.validacao_pendente
-        }
-        salvar_snapshot(snapshot)
-
-    # -----------------------------
-    # LEITURA
-    # -----------------------------
-
-    def obter_estado(self):
-        return {
-            "estado_id": self.estado_id,
-            "versao_estado": self.versao_estado,
-            "estado_atual": self.estado_atual,
-            "acoes_permitidas": PERMISSOES_POR_ESTADO[self.estado_atual],
-            "validacao_pendente": self.validacao_pendente,
-            "explicacao_humana": self.justificativa_humana_atual
-        }
-
-    # -----------------------------
-    # TRANSIÇÃO
-    # -----------------------------
-
-    def transicionar(self, novo_estado: EstadoEnum, motivo: str):
-        if self.estado_atual == EstadoEnum.AGUARDANDO_VALIDACAO:
-            raise ValueError("Estado congelado aguardando validação humana.")
-
-        self.estado_atual = novo_estado
-        self.versao_estado += 1
-        self.justificativa_humana_atual = (
-            f"Estado alterado para {novo_estado.value}. Motivo: {motivo}"
-        )
-        self._registrar(motivo)
-        self._persistir()
-
-# ==================================================
-# REGISTRO DE EVENTOS (WEBHOOKS)
-# ==================================================
-
-EVENTOS_REGISTRADOS: Dict[str, Dict] = {}
-
-def gerar_hash_evento(origem: str, payload: dict) -> str:
-    return hashlib.sha256(f"{origem}-{payload}".encode()).hexdigest()
-
-def registrar_evento(origem: str, tipo: TipoEvento, payload: dict):
-    h = gerar_hash_evento(origem, payload)
-    if h in EVENTOS_REGISTRADOS:
-        return {"status": "EVENTO_DUPLICADO", "hash": h}
-
-    EVENTOS_REGISTRADOS[h] = {
-        "evento_id": str(uuid.uuid4()),
-        "origem": origem,
-        "tipo": tipo.value,
-        "payload": payload,
-        "timestamp": datetime.utcnow().isoformat()
-    }
-    return {"status": "EVENTO_REGISTRADO", "hash": h}
-
-# ==================================================
-# FASTAPI
-# ==================================================
+# =====================================================
+# APP
+# =====================================================
 
 app = FastAPI(
-    title="Robo Global AI — Arquitetura Completa",
-    version="1.3.0"
+    title=APP_NAME,
+    version=APP_VERSION
 )
 
-ESTADO = EstadoDecisorio()
+# =====================================================
+# CORS
+# =====================================================
 
-# ==================================================
-# ENDPOINTS
-# ==================================================
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-@app.get("/estado")
-def estado():
-    return ESTADO.obter_estado()
+# =====================================================
+# LOGS HUMANOS
+# =====================================================
 
-@app.get("/estado/explicacao")
-def explicacao():
+def log(origem: str, nivel: str, mensagem: str):
+    print(f"[{origem}] [{nivel}] {mensagem}")
+
+# =====================================================
+# UTILIDADES DE TEMPO
+# =====================================================
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+# =====================================================
+# SEGURANÇA — HMAC
+# =====================================================
+
+def verify_hmac_sha256(payload: bytes, signature: str, secret: str) -> bool:
+    if not secret:
+        return False
+    digest = hmac.new(
+        secret.encode(),
+        payload,
+        hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(digest, signature)
+
+# =====================================================
+# SNAPSHOT — IDEMPOTÊNCIA
+# =====================================================
+
+def snapshot_exists(platform: str, external_event_id: str) -> bool:
+    try:
+        res = (
+            sb.table("event_snapshots")
+            .select("id")
+            .eq("platform", platform)
+            .eq("external_event_id", external_event_id)
+            .limit(1)
+            .execute()
+        )
+        return len(res.data) > 0
+    except Exception as e:
+        log("SNAPSHOT", "ERRO", f"Falha ao verificar duplicidade: {str(e)}")
+        raise
+
+def persist_snapshot(snapshot: Dict[str, Any]):
+    try:
+        sb.table("event_snapshots").insert(snapshot).execute()
+        log("SNAPSHOT", "INFO", f"Snapshot registrado: {snapshot.get('platform')} | {snapshot.get('external_event_id')}")
+    except Exception as e:
+        log("SNAPSHOT", "ERRO", f"Falha ao persistir snapshot: {str(e)}")
+        raise
+
+# =====================================================
+# NORMALIZAÇÃO CANÔNICA
+# =====================================================
+
+def normalize_hotmart(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
-        "explicacao": ESTADO.justificativa_humana_atual,
-        "historico": ESTADO.historico
+        "platform": "HOTMART",
+        "external_event_id": payload.get("id"),
+        "canonical_event": payload.get("event"),
+        "value": payload.get("data", {}).get("purchase", {}).get("price", {}).get("value"),
+        "currency": payload.get("data", {}).get("purchase", {}).get("price", {}).get("currency"),
+        "product_id": payload.get("data", {}).get("product", {}).get("id"),
+        "affiliate_id": payload.get("data", {}).get("affiliate", {}).get("affiliate_code"),
+        "event_timestamp": payload.get("creation_date"),
+        "received_at": utc_now_iso(),
+        "status": "REGISTRADO",
+        "raw_payload": payload
     }
 
-@app.post("/webhook/{origem}")
-async def webhook(origem: str, request: Request):
-    payload = await request.json()
-    resultado = registrar_evento(origem, TipoEvento.OUTRO, payload)
-
+def normalize_eduzz(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
-        "mensagem": "Evento registrado",
-        "resultado": resultado,
-        "estado_atual": ESTADO.estado_atual,
-        "explicacao": ESTADO.justificativa_humana_atual
+        "platform": "EDUZZ",
+        "external_event_id": payload.get("event_id"),
+        "canonical_event": payload.get("event_type"),
+        "value": payload.get("sale", {}).get("value"),
+        "currency": payload.get("sale", {}).get("currency"),
+        "product_id": payload.get("product", {}).get("id"),
+        "affiliate_id": payload.get("affiliate", {}).get("id"),
+        "event_timestamp": payload.get("event_date"),
+        "received_at": utc_now_iso(),
+        "status": "REGISTRADO",
+        "raw_payload": payload
     }
 
-# ==================================================
-# FIM DO ARQUIVO
-# ==================================================
+# =====================================================
+# ESTADO DECISÓRIO — CONSUMO PASSIVO
+# =====================================================
+
+def estado_decisorio_consumir(snapshot: Dict[str, Any]):
+    """
+    IMPORTANTE:
+    - Não executa ações externas
+    - Apenas atualiza estados internos ou métricas
+    - Implementação mínima para integração
+    """
+    log("ESTADO_DECISORIO", "INFO",
+        f"Snapshot consumido: {snapshot.get('platform')} | {snapshot.get('canonical_event')}")
+
+# =====================================================
+# PIPELINE DE CONSUMO ASSÍNCRONO (SIMPLIFICADO)
+# =====================================================
+
+def consumir_snapshot_async(snapshot: Dict[str, Any]):
+    def task():
+        try:
+            estado_decisorio_consumir(snapshot)
+        except Exception as e:
+            log("ESTADO_DECISORIO", "ERRO", f"Falha no consumo: {str(e)}")
+    threading.Thread(target=task, daemon=True).start()
+
+# =====================================================
+# WEBHOOK — HOTMART
+# =====================================================
+
+@app.post("/webhook/hotmart")
+async def webhook_hotmart(request: Request):
+    raw_body = await request.body()
+    signature = request.headers.get("X-Hotmart-Hmac-SHA256")
+
+    if not signature:
+        log("HOTMART", "ERRO", "Assinatura ausente")
+        raise HTTPException(status_code=401, detail="Assinatura ausente")
+
+    if not verify_hmac_sha256(raw_body, signature, HOTMART_WEBHOOK_SECRET):
+        log("HOTMART", "ERRO", "Assinatura inválida")
+        raise HTTPException(status_code=401, detail="Assinatura inválida")
+
+    payload = json.loads(raw_body.decode())
+    external_id = payload.get("id")
+
+    if not external_id:
+        log("HOTMART", "ERRO", "Evento sem ID externo")
+        raise HTTPException(status_code=400, detail="Evento sem ID externo")
+
+    if snapshot_exists("HOTMART", external_id):
+        log("HOTMART", "INFO", f"Evento duplicado ignorado: {external_id}")
+        return {"status": "duplicado_ignorado"}
+
+    snapshot = normalize_hotmart(payload)
+    persist_snapshot(snapshot)
+
+    consumir_snapshot_async(snapshot)
+
+    return {"status": "evento_registrado"}
+
+# =====================================================
+# WEBHOOK — EDUZZ
+# =====================================================
+
+@app.post("/webhook/eduzz")
+async def webhook_eduzz(request: Request):
+    raw_body = await request.body()
+    signature = request.headers.get("X-Eduzz-Signature")
+
+    if not signature:
+        log("EDUZZ", "ERRO", "Assinatura ausente")
+        raise HTTPException(status_code=401, detail="Assinatura ausente")
+
+    if not verify_hmac_sha256(raw_body, signature, EDUZZ_WEBHOOK_SECRET):
+        log("EDUZZ", "ERRO", "Assinatura inválida")
+        raise HTTPException(status_code=401, detail="Assinatura inválida")
+
+    payload = json.loads(raw_body.decode())
+    external_id = payload.get("event_id")
+
+    if not external_id:
+        log("EDUZZ", "ERRO", "Evento sem ID externo")
+        raise HTTPException(status_code=400, detail="Evento sem ID externo")
+
+    if snapshot_exists("EDUZZ", external_id):
+        log("EDUZZ", "INFO", f"Evento duplicado ignorado: {external_id}")
+        return {"status": "duplicado_ignorado"}
+
+    snapshot = normalize_eduzz(payload)
+    persist_snapshot(snapshot)
+
+    consumir_snapshot_async(snapshot)
+
+    return {"status": "evento_registrado"}
+
+# =====================================================
+# ENDPOINTS OPERACIONAIS EXISTENTES / BÁSICOS
+# =====================================================
+
+@app.get("/status")
+def status():
+    return {
+        "service": APP_NAME,
+        "version": APP_VERSION,
+        "phase": APP_PHASE,
+        "environment": ENV,
+        "instance_id": INSTANCE_ID,
+        "timestamp": utc_now_iso()
+    }
+
+@app.get("/health")
+def health():
+    return {
+        "status": "ok",
+        "timestamp": utc_now_iso()
+    }
+
+# =====================================================
+# READINESS / LIVENESS (RENDER)
+# =====================================================
+
+@app.get("/ready")
+def ready():
+    try:
+        sb.table("event_snapshots").select("id").limit(1).execute()
+        return {"ready": True}
+    except Exception as e:
+        log("SYSTEM", "ERRO", f"Readiness falhou: {str(e)}")
+        raise HTTPException(status_code=503, detail="Not ready")
+
+@app.get("/live")
+def live():
+    return {"live": True}
+
+# =====================================================
+# BOOTSTRAP LOG
+# =====================================================
+
+log("SYSTEM", "INFO", f"{APP_NAME} iniciado | versão {APP_VERSION} | instância {INSTANCE_ID}")
