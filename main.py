@@ -1,20 +1,20 @@
 # main.py — ROBO GLOBAL AI
-# ESTADO DECISÓRIO • IMPLEMENTAÇÃO FORMAL • AUTORIDADE SOBERANA
-# -------------------------------------------------------------
-# Este arquivo implementa o Estado Decisório como entidade
-# persistente, explicável e bloqueadora de ações.
-# Nenhuma ação do sistema pode ocorrer sem validação do Estado.
-# -------------------------------------------------------------
+# IMPLEMENTAÇÃO FORMAL DO ESTADO DECISÓRIO
+# ---------------------------------------
+# Este arquivo implementa o núcleo soberano do Robo Global AI.
+# Nenhuma ação ocorre fora do Estado Decisório.
+# Nenhuma decisão ocorre sem explicação humana.
+# ---------------------------------------
 
 from fastapi import FastAPI, HTTPException
 from enum import Enum
-from datetime import datetime
 from typing import List, Dict, Optional
+from datetime import datetime
 import uuid
 
-# =====================================================
-# ENUMERAÇÕES FORMALIZADAS
-# =====================================================
+# =========================================================
+# ENUMERAÇÕES FORMAIS
+# =========================================================
 
 class EstadoEnum(str, Enum):
     OBSERVACAO = "OBSERVACAO"
@@ -26,29 +26,29 @@ class EstadoEnum(str, Enum):
 
 class ClasseAcao(str, Enum):
     CAPTAR = "CAPTAR"
+    ANALISAR = "ANALISAR"
     INVESTIR = "INVESTIR"
     ESCALAR = "ESCALAR"
     PAUSAR = "PAUSAR"
     RECUAR = "RECUAR"
     DESCARTAR = "DESCARTAR"
-    REPROCESSAR = "REPROCESSAR"
 
 
-# =====================================================
-# MATRIZ DE PERMISSÕES (REGRA DURA)
-# =====================================================
+# =========================================================
+# MATRIZ DURA DE PERMISSÕES
+# =========================================================
 
 PERMISSOES_POR_ESTADO: Dict[EstadoEnum, List[ClasseAcao]] = {
     EstadoEnum.OBSERVACAO: [ClasseAcao.CAPTAR],
-    EstadoEnum.ANALISE: [ClasseAcao.CAPTAR, ClasseAcao.DESCARTAR],
+    EstadoEnum.ANALISE: [ClasseAcao.CAPTAR, ClasseAcao.ANALISAR, ClasseAcao.DESCARTAR],
     EstadoEnum.EXECUCAO: [ClasseAcao.INVESTIR],
     EstadoEnum.AGUARDANDO_VALIDACAO: [],
     EstadoEnum.BLOQUEADO: []
 }
 
-# =====================================================
-# ESTADO DECISÓRIO (ENTIDADE SOBERANA)
-# =====================================================
+# =========================================================
+# ENTIDADE SOBERANA — ESTADO DECISÓRIO
+# =========================================================
 
 class EstadoDecisorio:
     def __init__(self):
@@ -65,141 +65,136 @@ class EstadoDecisorio:
         self.plataformas_permitidas: List[str] = []
 
         self.justificativa_humana_atual: str = (
-            "O Robô iniciou em estado de OBSERVAÇÃO. "
-            "Neste estado, ele apenas coleta informações e não executa investimentos."
+            "O Robô iniciou em OBSERVAÇÃO. "
+            "Neste estado, apenas coleta informações. "
+            "Nenhuma execução é permitida."
         )
 
-        self.historico_decisorio_resumido: List[Dict] = []
-
+        self.historico_decisorio: List[Dict] = []
         self._registrar_historico("Estado inicial criado")
 
-    # -------------------------------------------------
-    # MÉTODOS DE LEITURA
-    # -------------------------------------------------
+    # ---------------------------
+    # LEITURA
+    # ---------------------------
 
-    def obter_estado_atual(self) -> EstadoEnum:
-        return self.estado_atual
-
-    def obter_acoes_permitidas(self) -> List[ClasseAcao]:
-        return PERMISSOES_POR_ESTADO[self.estado_atual]
-
-    def obter_restricoes(self) -> List[str]:
-        return self.restricoes_ativas
+    def obter_estado(self) -> Dict:
+        return {
+            "estado_id": self.estado_id,
+            "versao_estado": self.versao_estado,
+            "estado_atual": self.estado_atual,
+            "acoes_permitidas": PERMISSOES_POR_ESTADO[self.estado_atual],
+            "explicacao_humana": self.justificativa_humana_atual
+        }
 
     def obter_explicacao_humana(self) -> str:
         return self.justificativa_humana_atual
 
-    # -------------------------------------------------
+    # ---------------------------
     # VALIDAÇÕES
-    # -------------------------------------------------
+    # ---------------------------
 
-    def acao_eh_permitida(self, acao: ClasseAcao) -> bool:
-        return acao in self.obter_acoes_permitidas()
+    def acao_permitida(self, acao: ClasseAcao) -> bool:
+        return acao in PERMISSOES_POR_ESTADO[self.estado_atual]
 
-    def transicao_eh_valida(self, novo_estado: EstadoEnum) -> bool:
+    def transicao_permitida(self, novo_estado: EstadoEnum) -> bool:
         if self.estado_atual == EstadoEnum.BLOQUEADO:
             return False
         return True
 
-    # -------------------------------------------------
-    # TRANSIÇÕES DE ESTADO
-    # -------------------------------------------------
+    # ---------------------------
+    # TRANSIÇÕES
+    # ---------------------------
 
-    def solicitar_transicao(self, novo_estado: EstadoEnum, motivo: str):
-        if not self.transicao_eh_valida(novo_estado):
-            raise ValueError("Transição de estado não permitida")
+    def transicionar_estado(self, novo_estado: EstadoEnum, motivo: str):
+        if not self.transicao_permitida(novo_estado):
+            raise ValueError("Transição não permitida a partir do estado atual.")
 
         self.estado_atual = novo_estado
         self.versao_estado += 1
 
         self.justificativa_humana_atual = (
-            f"O Robô entrou no estado {novo_estado.value} pelo seguinte motivo: {motivo}"
+            f"O Robô mudou para o estado {novo_estado.value}. "
+            f"Motivo: {motivo}"
         )
 
         self._registrar_historico(motivo)
 
-    # -------------------------------------------------
+    # ---------------------------
     # HISTÓRICO HUMANO
-    # -------------------------------------------------
+    # ---------------------------
 
     def _registrar_historico(self, motivo: str):
-        self.historico_decisorio_resumido.append({
-            "data": datetime.utcnow().isoformat(),
+        self.historico_decisorio.append({
+            "timestamp": datetime.utcnow().isoformat(),
             "estado": self.estado_atual.value,
             "motivo": motivo
         })
 
 
-# =====================================================
+# =========================================================
 # INSTÂNCIA ÚNICA DO ESTADO (FONTE DA VERDADE)
-# =====================================================
+# =========================================================
 
-ESTADO_DECISORIO = EstadoDecisorio()
+ESTADO = EstadoDecisorio()
 
-# =====================================================
+# =========================================================
 # FASTAPI
-# =====================================================
+# =========================================================
 
 app = FastAPI(
     title="Robo Global AI — Estado Decisório",
-    description="Implementação formal do Estado Decisório soberano",
+    description="Núcleo soberano do Robo Global AI",
     version="1.0.0"
 )
 
-# =====================================================
-# ENDPOINTS OPERACIONAIS DO ESTADO
-# =====================================================
+# =========================================================
+# ENDPOINTS DO ESTADO
+# =========================================================
 
 @app.get("/estado")
-def obter_estado():
+def consultar_estado():
+    return ESTADO.obter_estado()
+
+
+@app.get("/estado/explicacao")
+def explicacao_humana():
     return {
-        "estado_id": ESTADO_DECISORIO.estado_id,
-        "versao": ESTADO_DECISORIO.versao_estado,
-        "estado_atual": ESTADO_DECISORIO.estado_atual,
-        "acoes_permitidas": ESTADO_DECISORIO.obter_acoes_permitidas(),
-        "explicacao_humana": ESTADO_DECISORIO.obter_explicacao_humana()
+        "explicacao": ESTADO.obter_explicacao_humana(),
+        "historico": ESTADO.historico_decisorio
     }
 
 
 @app.post("/estado/acao/{acao}")
 def solicitar_acao(acao: ClasseAcao):
-    if not ESTADO_DECISORIO.acao_eh_permitida(acao):
+    if not ESTADO.acao_permitida(acao):
         raise HTTPException(
             status_code=403,
             detail={
-                "mensagem": "Ação bloqueada pelo Estado Decisório",
-                "estado_atual": ESTADO_DECISORIO.estado_atual,
-                "explicacao": ESTADO_DECISORIO.obter_explicacao_humana()
+                "mensagem": "Ação bloqueada pelo Estado Decisório.",
+                "estado_atual": ESTADO.estado_atual,
+                "explicacao": ESTADO.obter_explicacao_humana()
             }
         )
 
     return {
-        "mensagem": f"Ação {acao.value} permitida pelo Estado Decisório",
-        "estado_atual": ESTADO_DECISORIO.estado_atual
+        "mensagem": f"Ação {acao.value} permitida pelo Estado.",
+        "estado_atual": ESTADO.estado_atual
     }
 
 
 @app.post("/estado/transicao/{novo_estado}")
 def solicitar_transicao(novo_estado: EstadoEnum, motivo: str):
     try:
-        ESTADO_DECISORIO.solicitar_transicao(novo_estado, motivo)
+        ESTADO.transicionar_estado(novo_estado, motivo)
     except ValueError as e:
         raise HTTPException(status_code=403, detail=str(e))
 
     return {
-        "mensagem": "Transição realizada com sucesso",
-        "novo_estado": ESTADO_DECISORIO.estado_atual,
-        "explicacao_humana": ESTADO_DECISORIO.obter_explicacao_humana()
+        "mensagem": "Transição realizada com sucesso.",
+        "novo_estado": ESTADO.estado_atual,
+        "explicacao": ESTADO.obter_explicacao_humana()
     }
 
-
-@app.get("/estado/explicacao")
-def explicacao_humana():
-    return {
-        "explicacao_humana": ESTADO_DECISORIO.obter_explicacao_humana(),
-        "historico": ESTADO_DECISORIO.historico_decisorio_resumido
-    }
-
-# -----------------------------------------------------
+# =========================================================
 # FIM DO ARQUIVO
-# -----------------------------------------------------
+# =========================================================
