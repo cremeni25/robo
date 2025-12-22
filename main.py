@@ -1,13 +1,13 @@
 # main.py — versão completa e final
 # ROBO GLOBAL AI
-# Integração REAL Hotmart + Eduzz
-# Estado Decisório Soberano • Eventos ≠ Ações • Snapshot Imutável
-# Logs humanos no padrão: [ORIGEM] [NÍVEL] mensagem
+# FASE 2 — ESTADO DECISÓRIO DISTRIBUÍDO (MULTI-INSTÂNCIA)
+# Eventos ≠ Ações • Snapshot Imutável • Decisão Singular
+# Logs humanos: [ORIGEM] [NÍVEL] mensagem
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from datetime import datetime, timezone
-from typing import Dict, Any, Optional
+from datetime import datetime, timezone, timedelta
+from typing import Dict, Any, Optional, List
 import os
 import json
 import hmac
@@ -23,8 +23,8 @@ from supabase import create_client, Client
 # =====================================================
 
 APP_NAME = "ROBO GLOBAL AI"
-APP_VERSION = "1.0.0"
-APP_PHASE = "INTEGRACAO_REAL_HOTMART_EDUZZ"
+APP_VERSION = "2.0.0"
+APP_PHASE = "ESTADO_DECISORIO_DISTRIBUIDO"
 
 ENV = os.getenv("ENV", "production")
 INSTANCE_ID = os.getenv("INSTANCE_ID", str(uuid.uuid4()))
@@ -35,6 +35,9 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 HOTMART_WEBHOOK_SECRET = os.getenv("HOTMART_WEBHOOK_SECRET")
 EDUZZ_WEBHOOK_SECRET = os.getenv("EDUZZ_WEBHOOK_SECRET")
 
+LOCK_TTL_SECONDS = int(os.getenv("LOCK_TTL_SECONDS", "60"))
+DECISION_BATCH_SIZE = int(os.getenv("DECISION_BATCH_SIZE", "10"))
+
 if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
     raise RuntimeError("Supabase não configurado corretamente")
 
@@ -44,10 +47,7 @@ sb: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 # APP
 # =====================================================
 
-app = FastAPI(
-    title=APP_NAME,
-    version=APP_VERSION
-)
+app = FastAPI(title=APP_NAME, version=APP_VERSION)
 
 # =====================================================
 # CORS
@@ -72,8 +72,11 @@ def log(origem: str, nivel: str, mensagem: str):
 # UTILIDADES DE TEMPO
 # =====================================================
 
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
 def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return utc_now().isoformat()
 
 # =====================================================
 # SEGURANÇA — HMAC
@@ -82,39 +85,27 @@ def utc_now_iso() -> str:
 def verify_hmac_sha256(payload: bytes, signature: str, secret: str) -> bool:
     if not secret:
         return False
-    digest = hmac.new(
-        secret.encode(),
-        payload,
-        hashlib.sha256
-    ).hexdigest()
+    digest = hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
     return hmac.compare_digest(digest, signature)
 
 # =====================================================
-# SNAPSHOT — IDEMPOTÊNCIA
+# SNAPSHOTS — IDEMPOTÊNCIA
 # =====================================================
 
 def snapshot_exists(platform: str, external_event_id: str) -> bool:
-    try:
-        res = (
-            sb.table("event_snapshots")
-            .select("id")
-            .eq("platform", platform)
-            .eq("external_event_id", external_event_id)
-            .limit(1)
-            .execute()
-        )
-        return len(res.data) > 0
-    except Exception as e:
-        log("SNAPSHOT", "ERRO", f"Falha ao verificar duplicidade: {str(e)}")
-        raise
+    res = (
+        sb.table("event_snapshots")
+        .select("id")
+        .eq("platform", platform)
+        .eq("external_event_id", external_event_id)
+        .limit(1)
+        .execute()
+    )
+    return len(res.data) > 0
 
 def persist_snapshot(snapshot: Dict[str, Any]):
-    try:
-        sb.table("event_snapshots").insert(snapshot).execute()
-        log("SNAPSHOT", "INFO", f"Snapshot registrado: {snapshot.get('platform')} | {snapshot.get('external_event_id')}")
-    except Exception as e:
-        log("SNAPSHOT", "ERRO", f"Falha ao persistir snapshot: {str(e)}")
-        raise
+    sb.table("event_snapshots").insert(snapshot).execute()
+    log("SNAPSHOT", "INFO", f"Registrado {snapshot.get('platform')} | {snapshot.get('external_event_id')}")
 
 # =====================================================
 # NORMALIZAÇÃO CANÔNICA
@@ -151,33 +142,123 @@ def normalize_eduzz(payload: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 # =====================================================
-# ESTADO DECISÓRIO — CONSUMO PASSIVO
+# DECISION CURSOR
 # =====================================================
 
-def estado_decisorio_consumir(snapshot: Dict[str, Any]):
+def get_decision_cursor() -> Optional[str]:
+    res = sb.table("decision_cursor").select("*").limit(1).execute()
+    return res.data[0]["last_snapshot_id"] if res.data else None
+
+def update_decision_cursor(snapshot_id: str):
+    sb.table("decision_cursor").upsert(
+        {"id": 1, "last_snapshot_id": snapshot_id, "updated_at": utc_now_iso()}
+    ).execute()
+
+# =====================================================
+# LOCK DISTRIBUÍDO
+# =====================================================
+
+def acquire_lock(snapshot_id: str) -> bool:
+    expires_at = utc_now() + timedelta(seconds=LOCK_TTL_SECONDS)
+    try:
+        sb.table("decision_locks").insert({
+            "snapshot_id": snapshot_id,
+            "instance_id": INSTANCE_ID,
+            "locked_at": utc_now_iso(),
+            "expires_at": expires_at.isoformat()
+        }).execute()
+        log("LOCK", "INFO", f"Lock adquirido para snapshot {snapshot_id}")
+        return True
+    except Exception:
+        return False
+
+def release_lock(snapshot_id: str):
+    sb.table("decision_locks") \
+      .delete() \
+      .eq("snapshot_id", snapshot_id) \
+      .eq("instance_id", INSTANCE_ID) \
+      .execute()
+    log("LOCK", "INFO", f"Lock liberado para snapshot {snapshot_id}")
+
+def cleanup_expired_locks():
+    sb.table("decision_locks") \
+      .delete() \
+      .lt("expires_at", utc_now_iso()) \
+      .execute()
+
+# =====================================================
+# DECISÃO — REGISTRO IMUTÁVEL
+# =====================================================
+
+def record_decision(snapshot: Dict[str, Any], conclusion: Dict[str, Any]):
+    decision = {
+        "snapshot_id": snapshot["id"],
+        "platform": snapshot["platform"],
+        "canonical_event": snapshot["canonical_event"],
+        "conclusion": conclusion,
+        "instance_id": INSTANCE_ID,
+        "created_at": utc_now_iso()
+    }
+    sb.table("decision_records").insert(decision).execute()
+    log("DECISAO", "INFO", f"Decisão registrada para snapshot {snapshot['id']}")
+
+# =====================================================
+# ESTADO DECISÓRIO — LÓGICA PURA
+# =====================================================
+
+def estado_decisorio(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     """
-    IMPORTANTE:
-    - Não executa ações externas
-    - Apenas atualiza estados internos ou métricas
-    - Implementação mínima para integração
+    Função PURA, determinística.
+    Nenhuma ação externa.
     """
-    log("ESTADO_DECISORIO", "INFO",
-        f"Snapshot consumido: {snapshot.get('platform')} | {snapshot.get('canonical_event')}")
+    return {
+        "avaliacao": "NEUTRA",
+        "motivo": "Evento registrado sem impacto decisório nesta fase",
+        "risco": "BAIXO"
+    }
 
 # =====================================================
-# PIPELINE DE CONSUMO ASSÍNCRONO (SIMPLIFICADO)
+# LOOP DISTRIBUÍDO DE DECISÃO
 # =====================================================
 
-def consumir_snapshot_async(snapshot: Dict[str, Any]):
-    def task():
+def decisor_loop():
+    while True:
         try:
-            estado_decisorio_consumir(snapshot)
+            cleanup_expired_locks()
+
+            cursor = get_decision_cursor()
+            query = sb.table("event_snapshots").select("*").order("id").limit(DECISION_BATCH_SIZE)
+            if cursor:
+                query = query.gt("id", cursor)
+
+            snapshots = query.execute().data or []
+
+            for snap in snapshots:
+                snapshot_id = snap["id"]
+
+                if not acquire_lock(snapshot_id):
+                    continue
+
+                try:
+                    decision = estado_decisorio(snap)
+                    record_decision(snap, decision)
+                    update_decision_cursor(snapshot_id)
+                finally:
+                    release_lock(snapshot_id)
+
         except Exception as e:
-            log("ESTADO_DECISORIO", "ERRO", f"Falha no consumo: {str(e)}")
-    threading.Thread(target=task, daemon=True).start()
+            log("DECISOR", "ERRO", f"Falha no loop decisório: {str(e)}")
+
+        time.sleep(2)
 
 # =====================================================
-# WEBHOOK — HOTMART
+# START LOOP EM BACKGROUND
+# =====================================================
+
+threading.Thread(target=decisor_loop, daemon=True).start()
+
+# =====================================================
+# WEBHOOKS — HOTMART
 # =====================================================
 
 @app.post("/webhook/hotmart")
@@ -185,34 +266,23 @@ async def webhook_hotmart(request: Request):
     raw_body = await request.body()
     signature = request.headers.get("X-Hotmart-Hmac-SHA256")
 
-    if not signature:
-        log("HOTMART", "ERRO", "Assinatura ausente")
-        raise HTTPException(status_code=401, detail="Assinatura ausente")
-
-    if not verify_hmac_sha256(raw_body, signature, HOTMART_WEBHOOK_SECRET):
-        log("HOTMART", "ERRO", "Assinatura inválida")
+    if not signature or not verify_hmac_sha256(raw_body, signature, HOTMART_WEBHOOK_SECRET):
         raise HTTPException(status_code=401, detail="Assinatura inválida")
 
     payload = json.loads(raw_body.decode())
     external_id = payload.get("id")
 
     if not external_id:
-        log("HOTMART", "ERRO", "Evento sem ID externo")
-        raise HTTPException(status_code=400, detail="Evento sem ID externo")
+        raise HTTPException(status_code=400, detail="Evento sem ID")
 
     if snapshot_exists("HOTMART", external_id):
-        log("HOTMART", "INFO", f"Evento duplicado ignorado: {external_id}")
         return {"status": "duplicado_ignorado"}
 
-    snapshot = normalize_hotmart(payload)
-    persist_snapshot(snapshot)
-
-    consumir_snapshot_async(snapshot)
-
+    persist_snapshot(normalize_hotmart(payload))
     return {"status": "evento_registrado"}
 
 # =====================================================
-# WEBHOOK — EDUZZ
+# WEBHOOKS — EDUZZ
 # =====================================================
 
 @app.post("/webhook/eduzz")
@@ -220,34 +290,23 @@ async def webhook_eduzz(request: Request):
     raw_body = await request.body()
     signature = request.headers.get("X-Eduzz-Signature")
 
-    if not signature:
-        log("EDUZZ", "ERRO", "Assinatura ausente")
-        raise HTTPException(status_code=401, detail="Assinatura ausente")
-
-    if not verify_hmac_sha256(raw_body, signature, EDUZZ_WEBHOOK_SECRET):
-        log("EDUZZ", "ERRO", "Assinatura inválida")
+    if not signature or not verify_hmac_sha256(raw_body, signature, EDUZZ_WEBHOOK_SECRET):
         raise HTTPException(status_code=401, detail="Assinatura inválida")
 
     payload = json.loads(raw_body.decode())
     external_id = payload.get("event_id")
 
     if not external_id:
-        log("EDUZZ", "ERRO", "Evento sem ID externo")
-        raise HTTPException(status_code=400, detail="Evento sem ID externo")
+        raise HTTPException(status_code=400, detail="Evento sem ID")
 
     if snapshot_exists("EDUZZ", external_id):
-        log("EDUZZ", "INFO", f"Evento duplicado ignorado: {external_id}")
         return {"status": "duplicado_ignorado"}
 
-    snapshot = normalize_eduzz(payload)
-    persist_snapshot(snapshot)
-
-    consumir_snapshot_async(snapshot)
-
+    persist_snapshot(normalize_eduzz(payload))
     return {"status": "evento_registrado"}
 
 # =====================================================
-# ENDPOINTS OPERACIONAIS EXISTENTES / BÁSICOS
+# STATUS / HEALTH
 # =====================================================
 
 @app.get("/status")
@@ -256,37 +315,16 @@ def status():
         "service": APP_NAME,
         "version": APP_VERSION,
         "phase": APP_PHASE,
-        "environment": ENV,
         "instance_id": INSTANCE_ID,
         "timestamp": utc_now_iso()
     }
 
 @app.get("/health")
 def health():
-    return {
-        "status": "ok",
-        "timestamp": utc_now_iso()
-    }
+    return {"status": "ok", "timestamp": utc_now_iso()}
 
 # =====================================================
-# READINESS / LIVENESS (RENDER)
+# BOOTSTRAP
 # =====================================================
 
-@app.get("/ready")
-def ready():
-    try:
-        sb.table("event_snapshots").select("id").limit(1).execute()
-        return {"ready": True}
-    except Exception as e:
-        log("SYSTEM", "ERRO", f"Readiness falhou: {str(e)}")
-        raise HTTPException(status_code=503, detail="Not ready")
-
-@app.get("/live")
-def live():
-    return {"live": True}
-
-# =====================================================
-# BOOTSTRAP LOG
-# =====================================================
-
-log("SYSTEM", "INFO", f"{APP_NAME} iniciado | versão {APP_VERSION} | instância {INSTANCE_ID}")
+log("SYSTEM", "INFO", f"{APP_NAME} iniciado | fase {APP_PHASE} | instância {INSTANCE_ID}")
