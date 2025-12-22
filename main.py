@@ -1,15 +1,17 @@
 # main.py — ROBO GLOBAL AI
-# ESTADO DECISÓRIO • VALIDAÇÃO HUMANA EXTERNA
-# --------------------------------------------------
-# Implementação soberana do Estado Decisório com
-# Validação Humana Formal (PASSO 3)
-# --------------------------------------------------
+# ESTADO DECISÓRIO • VALIDAÇÃO HUMANA • WEBHOOKS COMO EVENTOS
+# ----------------------------------------------------------
+# PASSO 4 IMPLEMENTADO
+# Webhooks são tratados exclusivamente como eventos externos.
+# Nenhum webhook executa ação ou altera estado diretamente.
+# ----------------------------------------------------------
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from enum import Enum
 from typing import List, Dict, Optional
 from datetime import datetime
 import uuid
+import hashlib
 
 # ==================================================
 # ENUMERAÇÕES
@@ -39,8 +41,15 @@ class RespostaHumana(str, Enum):
     SOLICITAR_AJUSTE = "SOLICITAR_AJUSTE"
     ADIAR = "ADIAR"
 
+
+class TipoEvento(str, Enum):
+    VENDA = "VENDA"
+    REEMBOLSO = "REEMBOLSO"
+    CANCELAMENTO = "CANCELAMENTO"
+    OUTRO = "OUTRO"
+
 # ==================================================
-# MATRIZ DURA DE PERMISSÕES
+# MATRIZ DE PERMISSÕES
 # ==================================================
 
 PERMISSOES_POR_ESTADO = {
@@ -63,21 +72,17 @@ class EstadoDecisorio:
 
         self.justificativa_humana_atual = (
             "O Robô iniciou em OBSERVAÇÃO. "
-            "Apenas coleta informações."
+            "Webhooks apenas registram fatos."
         )
 
         self.historico: List[Dict] = []
 
-        # ----- Validação Humana -----
-        self.validacao_pendente: bool = False
-        self.pedido_humano: Optional[Dict] = None
+        # Validação humana
+        self.validacao_pendente = False
         self.estado_proposto: Optional[EstadoEnum] = None
+        self.pedido_humano: Optional[Dict] = None
 
         self._registrar("Estado inicial criado")
-
-    # -----------------------------
-    # UTIL
-    # -----------------------------
 
     def _registrar(self, motivo: str):
         self.historico.append({
@@ -86,41 +91,15 @@ class EstadoDecisorio:
             "motivo": motivo
         })
 
-    # -----------------------------
-    # LEITURA
-    # -----------------------------
-
     def obter_estado(self):
         return {
             "estado_id": self.estado_id,
             "versao_estado": self.versao_estado,
             "estado_atual": self.estado_atual,
             "acoes_permitidas": PERMISSOES_POR_ESTADO[self.estado_atual],
-            "explicacao_humana": self.justificativa_humana_atual,
-            "validacao_pendente": self.validacao_pendente
+            "validacao_pendente": self.validacao_pendente,
+            "explicacao_humana": self.justificativa_humana_atual
         }
-
-    # -----------------------------
-    # TRANSIÇÃO NORMAL
-    # -----------------------------
-
-    def transicionar(self, novo_estado: EstadoEnum, motivo: str):
-        if self.estado_atual == EstadoEnum.AGUARDANDO_VALIDACAO:
-            raise ValueError("Estado congelado aguardando validação humana.")
-
-        self.estado_atual = novo_estado
-        self.versao_estado += 1
-
-        self.justificativa_humana_atual = (
-            f"O Robô mudou para {novo_estado.value}. "
-            f"Motivo: {motivo}"
-        )
-
-        self._registrar(motivo)
-
-    # -----------------------------
-    # SOLICITAÇÃO DE VALIDAÇÃO HUMANA
-    # -----------------------------
 
     def solicitar_validacao_humana(
         self,
@@ -135,51 +114,39 @@ class EstadoDecisorio:
         self.versao_estado += 1
 
         self.pedido_humano = {
-            "o_que": f"Transitar para {estado_proposto.value}",
-            "por_que": motivo,
+            "acao_proposta": estado_proposto.value,
+            "motivo": motivo,
             "risco": risco,
-            "capital_envolvido": capital,
-            "consequencia_se_aprovado": f"O Robô entrará em {estado_proposto.value}",
-            "consequencia_se_negado": "O Robô não avançará e recuará para análise"
+            "capital": capital
         }
 
         self.justificativa_humana_atual = (
-            "O Robô está aguardando validação humana para avançar."
+            "O Robô está aguardando validação humana para uma decisão crítica."
         )
 
         self._registrar("Validação humana solicitada")
 
-    # -----------------------------
-    # RESPOSTA HUMANA
-    # -----------------------------
-
     def responder_validacao(self, resposta: RespostaHumana, motivo: Optional[str] = None):
         if not self.validacao_pendente:
-            raise ValueError("Não existe validação pendente.")
+            raise ValueError("Nenhuma validação pendente.")
 
         if resposta == RespostaHumana.APROVAR:
             self.estado_atual = self.estado_proposto
             self.justificativa_humana_atual = (
-                f"O humano aprovou a transição para {self.estado_proposto.value}."
+                f"Humano aprovou a transição para {self.estado_proposto.value}."
             )
 
         elif resposta == RespostaHumana.NEGAR:
             self.estado_atual = EstadoEnum.ANALISE
-            self.justificativa_humana_atual = (
-                f"O humano negou a transição. Motivo: {motivo}"
-            )
+            self.justificativa_humana_atual = f"Humano negou a decisão. Motivo: {motivo}"
 
         elif resposta == RespostaHumana.SOLICITAR_AJUSTE:
             self.estado_atual = EstadoEnum.ANALISE
-            self.justificativa_humana_atual = (
-                f"O humano solicitou ajustes. Motivo: {motivo}"
-            )
+            self.justificativa_humana_atual = f"Humano solicitou ajustes. Motivo: {motivo}"
 
         elif resposta == RespostaHumana.ADIAR:
-            self.justificativa_humana_atual = (
-                "O humano optou por adiar a decisão. Estado permanece congelado."
-            )
-            return  # mantém congelado
+            self.justificativa_humana_atual = "Humano adiou a decisão."
+            return
 
         self.validacao_pendente = False
         self.estado_proposto = None
@@ -189,28 +156,55 @@ class EstadoDecisorio:
         self._registrar(f"Resposta humana: {resposta.value}")
 
 # ==================================================
-# INSTÂNCIA ÚNICA
+# REGISTRO DE EVENTOS (WEBHOOKS)
 # ==================================================
 
-ESTADO = EstadoDecisorio()
+EVENTOS_REGISTRADOS: Dict[str, Dict] = {}
+
+def gerar_hash_evento(origem: str, payload: dict) -> str:
+    bruto = f"{origem}-{payload}"
+    return hashlib.sha256(bruto.encode()).hexdigest()
+
+def registrar_evento(origem: str, tipo: TipoEvento, payload: dict) -> Dict:
+    hash_evento = gerar_hash_evento(origem, payload)
+
+    if hash_evento in EVENTOS_REGISTRADOS:
+        return {
+            "status": "EVENTO_DUPLICADO",
+            "hash_evento": hash_evento
+        }
+
+    EVENTOS_REGISTRADOS[hash_evento] = {
+        "evento_id": str(uuid.uuid4()),
+        "origem": origem,
+        "tipo": tipo.value,
+        "payload": payload,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+    return {
+        "status": "EVENTO_REGISTRADO",
+        "hash_evento": hash_evento
+    }
 
 # ==================================================
 # FASTAPI
 # ==================================================
 
 app = FastAPI(
-    title="Robo Global AI — Estado Decisório + Validação Humana",
-    version="1.1.0"
+    title="Robo Global AI — Estado + Webhooks",
+    version="1.2.0"
 )
 
+ESTADO = EstadoDecisorio()
+
 # ==================================================
-# ENDPOINTS
+# ENDPOINTS DO ESTADO
 # ==================================================
 
 @app.get("/estado")
 def estado():
     return ESTADO.obter_estado()
-
 
 @app.get("/estado/explicacao")
 def explicacao():
@@ -218,30 +212,6 @@ def explicacao():
         "explicacao": ESTADO.justificativa_humana_atual,
         "historico": ESTADO.historico
     }
-
-
-@app.post("/estado/solicitar-validacao")
-def solicitar_validacao(
-    estado_proposto: EstadoEnum,
-    motivo: str,
-    risco: str,
-    capital: float
-):
-    try:
-        ESTADO.solicitar_validacao_humana(
-            estado_proposto=estado_proposto,
-            motivo=motivo,
-            risco=risco,
-            capital=capital
-        )
-    except Exception as e:
-        raise HTTPException(status_code=403, detail=str(e))
-
-    return {
-        "mensagem": "Validação humana solicitada",
-        "pedido": ESTADO.pedido_humano
-    }
-
 
 @app.post("/estado/responder-validacao")
 def responder_validacao(resposta: RespostaHumana, motivo: Optional[str] = None):
@@ -252,6 +222,29 @@ def responder_validacao(resposta: RespostaHumana, motivo: Optional[str] = None):
 
     return {
         "mensagem": "Resposta humana registrada",
+        "estado": ESTADO.estado_atual
+    }
+
+# ==================================================
+# WEBHOOKS COMO EVENTOS
+# ==================================================
+
+@app.post("/webhook/{origem}")
+async def receber_webhook(origem: str, request: Request):
+    payload = await request.json()
+
+    tipo = TipoEvento.OUTRO
+    if "venda" in payload.get("evento", "").lower():
+        tipo = TipoEvento.VENDA
+    elif "reembolso" in payload.get("evento", "").lower():
+        tipo = TipoEvento.REEMBOLSO
+
+    resultado = registrar_evento(origem, tipo, payload)
+
+    # Nenhuma decisão ocorre aqui
+    return {
+        "mensagem": "Webhook recebido como evento",
+        "resultado": resultado,
         "estado_atual": ESTADO.estado_atual,
         "explicacao": ESTADO.justificativa_humana_atual
     }
