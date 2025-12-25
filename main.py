@@ -1,108 +1,40 @@
-# main.py — ROBO GLOBAL AI
-# BLOCO A + BLOCO B — BACKEND + ACQUISITION ENGINE (META ADS)
-# Versão: 1.1
-# Data: 25/12/2025
-# ARQUIVO COMPLETO PARA SUBSTITUIÇÃO TOTAL
+# main.py — ROBO GLOBAL AI (API SOBERANA)
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from datetime import datetime, timezone
-from typing import Dict
+import subprocess
+import os
 
-# ================================
-# ESTADO GLOBAL DA FÁBRICA
-# ================================
+app = FastAPI(title="Robo Global AI")
 
-ENGINE_STATE: Dict[str, any] = {
-    "status": "STOPPED",
-    "started_at": None,
-    "stopped_at": None,
-    "capital_investido": 0.0,
-    "receita_total": 0.0,
-    "resultado_liquido": 0.0,
-    "decisao_atual": "Fábrica inativa",
-}
-
-# ================================
-# MODELOS
-# ================================
-
-class FinancialUpdate(BaseModel):
-    investido: float = 0.0
-    receita: float = 0.0
-
-# ================================
-# ENGINE NÚCLEO
-# ================================
-
-def start_engine():
-    if ENGINE_STATE["status"] == "RUNNING":
-        return ENGINE_STATE
-    ENGINE_STATE["status"] = "RUNNING"
-    ENGINE_STATE["started_at"] = datetime.now(timezone.utc)
-    ENGINE_STATE["decisao_atual"] = "Fábrica ativada"
-    return ENGINE_STATE
-
-
-def stop_engine():
-    if ENGINE_STATE["status"] == "STOPPED":
-        return ENGINE_STATE
-    ENGINE_STATE["status"] = "STOPPED"
-    ENGINE_STATE["stopped_at"] = datetime.now(timezone.utc)
-    ENGINE_STATE["decisao_atual"] = "Fábrica pausada"
-    return ENGINE_STATE
-
-
-def update_financials(investido: float, receita: float):
-    ENGINE_STATE["capital_investido"] += investido
-    ENGINE_STATE["receita_total"] += receita
-    ENGINE_STATE["resultado_liquido"] = ENGINE_STATE["receita_total"] - ENGINE_STATE["capital_investido"]
-    return ENGINE_STATE
-
-# ================================
-# APP FASTAPI
-# ================================
-
-app = FastAPI(title="Robo Global AI", version="1.1")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# ================================
-# ENDPOINTS BLOCO A
-# ================================
-
-@app.post("/engine/start")
-def engine_start():
-    return start_engine()
-
-@app.post("/engine/stop")
-def engine_stop():
-    return stop_engine()
-
-@app.get("/dashboard/state")
-def dashboard_state():
-    return ENGINE_STATE
-
-@app.post("/engine/finance")
-def engine_finance(update: FinancialUpdate):
-    return update_financials(update.investido, update.receita)
+class ExecuteRequest(BaseModel):
+    mode: str
+    max_spend: float
 
 @app.get("/status")
 def status():
-    return {"service": "Robo Global AI", "engine_status": ENGINE_STATE["status"]}
+    return {
+        "service": "Robo Global AI",
+        "engine_status": "READY"
+    }
 
-# ================================
-# ENDPOINT BLOCO B — ACQUISITION META ADS
-# ================================
+@app.post("/engine/execute")
+def execute_engine(payload: ExecuteRequest):
+    if payload.mode != "acquisition_meta_ads":
+        raise HTTPException(status_code=400, detail="Modo inválido")
 
-@app.post("/engine/acquisition/start")
-def start_acquisition():
-    from acquisition_meta_ads import run_real_test
-    return run_real_test()
+    if payload.max_spend <= 0:
+        raise HTTPException(status_code=400, detail="Max spend inválido")
+
+    try:
+        result = subprocess.Popen(
+            ["python", "acquisition_meta_ads.py"],
+            env={**os.environ, "MAX_TEST_SPEND": str(payload.max_spend)}
+        )
+        return {
+            "status": "EXECUTING",
+            "mode": payload.mode,
+            "pid": result.pid
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
