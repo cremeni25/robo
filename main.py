@@ -134,3 +134,9 @@ def status():
         "service": "Robo Global AI",
         "engine_status": ENGINE_STATE["status"],
     }
+
+from acquisition_meta_ads import run_real_test
+
+@app.post("/engine/acquisition/start")
+def start_acquisition():
+    return run_real_test()
