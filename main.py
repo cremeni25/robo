@@ -1,9 +1,8 @@
-# main.py — ROBO GLOBAL AI (API SOBERANA)
+# main.py — ROBO GLOBAL AI (API SOBERANA FINAL)
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import subprocess
-import os
+import acquisition_meta_ads
 
 app = FastAPI(title="Robo Global AI")
 
@@ -27,14 +26,15 @@ def execute_engine(payload: ExecuteRequest):
         raise HTTPException(status_code=400, detail="Max spend inválido")
 
     try:
-        result = subprocess.Popen(
-            ["python", "acquisition_meta_ads.py"],
-            env={**os.environ, "MAX_TEST_SPEND": str(payload.max_spend)}
-        )
+        # garante alinhamento do teto
+        acquisition_meta_ads.MAX_TEST_SPEND = payload.max_spend
+
+        result = acquisition_meta_ads.run_real_test()
+
         return {
-            "status": "EXECUTING",
-            "mode": payload.mode,
-            "pid": result.pid
+            "status": "EXECUTED",
+            "result": result
         }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
