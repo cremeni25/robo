@@ -1,8 +1,8 @@
 # main.py — ROBO GLOBAL AI
-# BLOCO A — BACKEND DA FÁBRICA DE MONETIZAÇÃO
-# Versão: 1.0
+# BLOCO A + BLOCO B — BACKEND + ACQUISITION ENGINE (META ADS)
+# Versão: 1.1
 # Data: 25/12/2025
-# Arquivo COMPLETO para SUBSTITUIÇÃO TOTAL
+# ARQUIVO COMPLETO PARA SUBSTITUIÇÃO TOTAL
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,7 +15,7 @@ from typing import Dict
 # ================================
 
 ENGINE_STATE: Dict[str, any] = {
-    "status": "STOPPED",  # RUNNING | STOPPED
+    "status": "STOPPED",
     "started_at": None,
     "stopped_at": None,
     "capital_investido": 0.0,
@@ -25,7 +25,7 @@ ENGINE_STATE: Dict[str, any] = {
 }
 
 # ================================
-# MODELOS DE DADOS
+# MODELOS
 # ================================
 
 class FinancialUpdate(BaseModel):
@@ -33,110 +33,76 @@ class FinancialUpdate(BaseModel):
     receita: float = 0.0
 
 # ================================
-# FUNÇÕES NÚCLEO DA ENGINE
+# ENGINE NÚCLEO
 # ================================
 
 def start_engine():
     if ENGINE_STATE["status"] == "RUNNING":
         return ENGINE_STATE
-
     ENGINE_STATE["status"] = "RUNNING"
     ENGINE_STATE["started_at"] = datetime.now(timezone.utc)
-    ENGINE_STATE["decisao_atual"] = (
-        "Fábrica ativada. Aquisição e monetização em execução."
-    )
+    ENGINE_STATE["decisao_atual"] = "Fábrica ativada"
     return ENGINE_STATE
 
 
 def stop_engine():
     if ENGINE_STATE["status"] == "STOPPED":
         return ENGINE_STATE
-
     ENGINE_STATE["status"] = "STOPPED"
     ENGINE_STATE["stopped_at"] = datetime.now(timezone.utc)
-    ENGINE_STATE["decisao_atual"] = (
-        "Fábrica pausada. Nenhum tráfego ativo."
-    )
+    ENGINE_STATE["decisao_atual"] = "Fábrica pausada"
     return ENGINE_STATE
 
 
 def update_financials(investido: float, receita: float):
-    ENGINE_STATE["capital_investido"] += float(investido)
-    ENGINE_STATE["receita_total"] += float(receita)
-    ENGINE_STATE["resultado_liquido"] = (
-        ENGINE_STATE["receita_total"] - ENGINE_STATE["capital_investido"]
-    )
-
-    if ENGINE_STATE["resultado_liquido"] > 0:
-        ENGINE_STATE["decisao_atual"] = "Operação positiva. Escala permitida."
-    else:
-        ENGINE_STATE["decisao_atual"] = "Operação negativa. Atenção ou ajuste."
-
-    return ENGINE_STATE
-
-
-def get_engine_state():
+    ENGINE_STATE["capital_investido"] += investido
+    ENGINE_STATE["receita_total"] += receita
+    ENGINE_STATE["resultado_liquido"] = ENGINE_STATE["receita_total"] - ENGINE_STATE["capital_investido"]
     return ENGINE_STATE
 
 # ================================
-# APLICAÇÃO FASTAPI
+# APP FASTAPI
 # ================================
 
-app = FastAPI(
-    title="Robo Global AI — Fábrica de Monetização",
-    version="1.0",
-)
+app = FastAPI(title="Robo Global AI", version="1.1")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"] ,
-    allow_headers=["*"] ,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # ================================
-# ENDPOINTS DE VIDA DA FÁBRICA
+# ENDPOINTS BLOCO A
 # ================================
 
 @app.post("/engine/start")
 def engine_start():
-    state = start_engine()
-    return {"status": "OK", "engine": state}
-
+    return start_engine()
 
 @app.post("/engine/stop")
 def engine_stop():
-    state = stop_engine()
-    return {"status": "OK", "engine": state}
-
+    return stop_engine()
 
 @app.get("/dashboard/state")
 def dashboard_state():
-    return get_engine_state()
-
-# ================================
-# ENDPOINT FINANCEIRO (INTERNO)
-# ================================
+    return ENGINE_STATE
 
 @app.post("/engine/finance")
 def engine_finance(update: FinancialUpdate):
-    state = update_financials(update.investido, update.receita)
-    return {"status": "OK", "engine": state}
-
-# ================================
-# HEALTHCHECK
-# ================================
+    return update_financials(update.investido, update.receita)
 
 @app.get("/status")
 def status():
-    return {
-        "service": "Robo Global AI",
-        "engine_status": ENGINE_STATE["status"],
-    }
+    return {"service": "Robo Global AI", "engine_status": ENGINE_STATE["status"]}
 
-from acquisition_meta_ads import run_real_test
+# ================================
+# ENDPOINT BLOCO B — ACQUISITION META ADS
+# ================================
 
 @app.post("/engine/acquisition/start")
 def start_acquisition():
+    from acquisition_meta_ads import run_real_test
     return run_real_test()
