@@ -1,9 +1,8 @@
-# main.py — versão completa e final
+# main.py — versão completa e final DEFINITIVA
 # ROBO GLOBAL AI — ENGINE OPERACIONAL REAL
 # SUBSTITUIÇÃO TOTAL DO ARQUIVO
 # Compatível com Render (health check em /status)
-# Meta Ads Objective: OUTCOME_TRAFFIC
-# special_ad_categories: ["NONE"]
+# Meta Ads (Outcome-based) — CONTRATO ATUAL VALIDADO
 # Data: 26/12/2025
 
 import os
@@ -20,7 +19,7 @@ from pydantic import BaseModel
 # ======================================================
 
 META_ACCESS_TOKEN = os.getenv("META_ACCESS_TOKEN")
-META_AD_ACCOUNT_ID = os.getenv("META_AD_ACCOUNT_ID")  # somente número (sem act_)
+META_AD_ACCOUNT_ID = os.getenv("META_AD_ACCOUNT_ID")  # SOMENTE NÚMERO (sem act_)
 HOTMART_WEBHOOK_SECRET = os.getenv("HOTMART_WEBHOOK_SECRET")
 
 META_API_VERSION = "v19.0"
@@ -45,7 +44,7 @@ ENGINE_STOP_EVENT = threading.Event()
 
 app = FastAPI(
     title="Robo Global AI — Engine Operacional",
-    version="1.0.3",
+    version="1.0.4",
 )
 
 # ======================================================
@@ -74,11 +73,13 @@ def create_meta_campaign() -> str:
 
     url = f"https://graph.facebook.com/{META_API_VERSION}/act_{META_AD_ACCOUNT_ID}/campaigns"
 
+    # CONTRATO ATUAL OBRIGATÓRIO DA META (OUTCOME-BASED)
     payload = {
         "name": "RoboGlobalAI_Campaign",
         "objective": "OUTCOME_TRAFFIC",
         "status": "PAUSED",
         "special_ad_categories": ["NONE"],
+        "is_adset_budget_sharing_enabled": True
     }
 
     response = requests.post(
@@ -109,7 +110,7 @@ def set_campaign_status(campaign_id: str, status: str):
         raise RuntimeError(f"Erro ao alterar status da campanha: {response.text}")
 
 # ======================================================
-# LOOP OPERACIONAL (MVP)
+# LOOP OPERACIONAL (ENGINE VIVO)
 # ======================================================
 
 def engine_loop():
