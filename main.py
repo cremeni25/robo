@@ -2,7 +2,8 @@
 # ROBO GLOBAL AI — ENGINE OPERACIONAL REAL
 # SUBSTITUIÇÃO TOTAL DO ARQUIVO
 # Compatível com Render (health check em /status)
-# Objective Meta Ads: OUTCOME_TRAFFIC
+# Meta Ads Objective: OUTCOME_TRAFFIC
+# special_ad_categories: ["NONE"]
 # Data: 26/12/2025
 
 import os
@@ -44,7 +45,7 @@ ENGINE_STOP_EVENT = threading.Event()
 
 app = FastAPI(
     title="Robo Global AI — Engine Operacional",
-    version="1.0.2",
+    version="1.0.3",
 )
 
 # ======================================================
@@ -77,7 +78,7 @@ def create_meta_campaign() -> str:
         "name": "RoboGlobalAI_Campaign",
         "objective": "OUTCOME_TRAFFIC",
         "status": "PAUSED",
-        "special_ad_categories": [],
+        "special_ad_categories": ["NONE"],
     }
 
     response = requests.post(
@@ -112,10 +113,6 @@ def set_campaign_status(campaign_id: str, status: str):
 # ======================================================
 
 def engine_loop():
-    """
-    Loop contínuo do engine.
-    Mantém o processo vivo enquanto RUNNING.
-    """
     while not ENGINE_STOP_EVENT.is_set():
         time.sleep(5)
 
@@ -175,7 +172,7 @@ def engine_pause():
 
         return EngineResponse(
             status="PAUSED",
-            detail="Engine pausada (lógica interna)",
+            detail="Engine pausada",
             campaign_id=ENGINE_STATE["campaign_id"],
         )
 
@@ -199,7 +196,7 @@ def engine_status():
     return ENGINE_STATE
 
 # ======================================================
-# WEBHOOK HOTMART (RECEPÇÃO REAL)
+# WEBHOOK HOTMART
 # ======================================================
 
 @app.post("/webhook/hotmart")
@@ -208,7 +205,7 @@ def hotmart_webhook(payload: dict):
     return {"ok": True}
 
 # ======================================================
-# HEALTH CHECK (OBRIGATÓRIO PARA RENDER)
+# HEALTH CHECK (RENDER)
 # ======================================================
 
 @app.get("/status")
@@ -229,5 +226,4 @@ def root():
 # ======================================================
 # ENTRYPOINT
 # ======================================================
-# Render / uvicorn:
 # uvicorn main:app --host 0.0.0.0 --port 8000
