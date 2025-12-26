@@ -1,7 +1,8 @@
-# main.py — versão completa e final (COM /status)
+# main.py — versão completa e final
 # ROBO GLOBAL AI — ENGINE OPERACIONAL REAL
 # SUBSTITUIÇÃO TOTAL DO ARQUIVO
 # Compatível com Render (health check em /status)
+# Objective Meta Ads: OUTCOME_TRAFFIC
 # Data: 26/12/2025
 
 import os
@@ -43,7 +44,7 @@ ENGINE_STOP_EVENT = threading.Event()
 
 app = FastAPI(
     title="Robo Global AI — Engine Operacional",
-    version="1.0.1",
+    version="1.0.2",
 )
 
 # ======================================================
@@ -74,7 +75,7 @@ def create_meta_campaign() -> str:
 
     payload = {
         "name": "RoboGlobalAI_Campaign",
-        "objective": "TRAFFIC",
+        "objective": "OUTCOME_TRAFFIC",
         "status": "PAUSED",
         "special_ad_categories": [],
     }
@@ -203,7 +204,6 @@ def engine_status():
 
 @app.post("/webhook/hotmart")
 def hotmart_webhook(payload: dict):
-    # Validação do secret poderá ser adicionada depois
     print("[HOTMART EVENT RECEIVED]", payload)
     return {"ok": True}
 
