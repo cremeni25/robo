@@ -1,7 +1,8 @@
-# main.py — versão completa e final
+# main.py — versão completa e final (COM /status)
 # ROBO GLOBAL AI — ENGINE OPERACIONAL REAL
-# Substituição TOTAL do arquivo
-# Data: 25/12/2025
+# SUBSTITUIÇÃO TOTAL DO ARQUIVO
+# Compatível com Render (health check em /status)
+# Data: 26/12/2025
 
 import os
 import time
@@ -21,11 +22,6 @@ META_AD_ACCOUNT_ID = os.getenv("META_AD_ACCOUNT_ID")  # somente número (sem act
 HOTMART_WEBHOOK_SECRET = os.getenv("HOTMART_WEBHOOK_SECRET")
 
 META_API_VERSION = "v19.0"
-
-if not META_ACCESS_TOKEN or not META_AD_ACCOUNT_ID:
-    # Não levanta exceção aqui para não matar o deploy;
-    # os endpoints de engine validarão em tempo de uso.
-    pass
 
 # ======================================================
 # ESTADO GLOBAL DO ENGINE
@@ -47,7 +43,7 @@ ENGINE_STOP_EVENT = threading.Event()
 
 app = FastAPI(
     title="Robo Global AI — Engine Operacional",
-    version="1.0.0",
+    version="1.0.1",
 )
 
 # ======================================================
@@ -64,6 +60,8 @@ class EngineResponse(BaseModel):
 # ======================================================
 
 def _meta_headers():
+    if not META_ACCESS_TOKEN:
+        raise RuntimeError("META_ACCESS_TOKEN não configurado")
     return {
         "Authorization": f"Bearer {META_ACCESS_TOKEN}",
     }
@@ -81,7 +79,12 @@ def create_meta_campaign() -> str:
         "special_ad_categories": [],
     }
 
-    response = requests.post(url, data=payload, headers=_meta_headers(), timeout=30)
+    response = requests.post(
+        url,
+        data=payload,
+        headers=_meta_headers(),
+        timeout=30,
+    )
 
     if response.status_code != 200:
         raise RuntimeError(f"Erro ao criar campanha Meta Ads: {response.text}")
@@ -93,20 +96,24 @@ def set_campaign_status(campaign_id: str, status: str):
     url = f"https://graph.facebook.com/{META_API_VERSION}/{campaign_id}"
     payload = {"status": status}
 
-    response = requests.post(url, data=payload, headers=_meta_headers(), timeout=30)
+    response = requests.post(
+        url,
+        data=payload,
+        headers=_meta_headers(),
+        timeout=30,
+    )
 
     if response.status_code != 200:
         raise RuntimeError(f"Erro ao alterar status da campanha: {response.text}")
 
 # ======================================================
-# LOOP OPERACIONAL (SIMPLIFICADO)
+# LOOP OPERACIONAL (MVP)
 # ======================================================
 
 def engine_loop():
     """
     Loop contínuo do engine.
-    Neste MVP real, o loop apenas mantém o estado vivo.
-    A lógica de escala/corte será evoluída a partir daqui.
+    Mantém o processo vivo enquanto RUNNING.
     """
     while not ENGINE_STOP_EVENT.is_set():
         time.sleep(5)
@@ -196,13 +203,20 @@ def engine_status():
 
 @app.post("/webhook/hotmart")
 def hotmart_webhook(payload: dict):
-    # Validação do secret poderá ser adicionada na próxima iteração
-    # Neste ponto, o objetivo é materializar o endpoint real
+    # Validação do secret poderá ser adicionada depois
     print("[HOTMART EVENT RECEIVED]", payload)
     return {"ok": True}
 
 # ======================================================
-# HEALTHCHECK BÁSICO
+# HEALTH CHECK (OBRIGATÓRIO PARA RENDER)
+# ======================================================
+
+@app.get("/status")
+def status():
+    return {"status": "ok"}
+
+# ======================================================
+# ROOT
 # ======================================================
 
 @app.get("/")
