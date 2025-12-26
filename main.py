@@ -2,7 +2,7 @@
 # ROBO GLOBAL AI — ENGINE OPERACIONAL REAL
 # SUBSTITUIÇÃO TOTAL DO ARQUIVO
 # Compatível com Render (health check em /status)
-# Meta Ads (Outcome-based) — CONTRATO ATUAL VALIDADO
+# Meta Ads (Outcome-based + CBO) — CONTRATO ATUAL VALIDADO
 # Data: 26/12/2025
 
 import os
@@ -44,7 +44,7 @@ ENGINE_STOP_EVENT = threading.Event()
 
 app = FastAPI(
     title="Robo Global AI — Engine Operacional",
-    version="1.0.4",
+    version="1.0.5",
 )
 
 # ======================================================
@@ -73,13 +73,14 @@ def create_meta_campaign() -> str:
 
     url = f"https://graph.facebook.com/{META_API_VERSION}/act_{META_AD_ACCOUNT_ID}/campaigns"
 
-    # CONTRATO ATUAL OBRIGATÓRIO DA META (OUTCOME-BASED)
+    # CONTRATO FINAL OBRIGATÓRIO DA META (OUTCOME + CBO)
     payload = {
         "name": "RoboGlobalAI_Campaign",
         "objective": "OUTCOME_TRAFFIC",
         "status": "PAUSED",
         "special_ad_categories": ["NONE"],
-        "is_adset_budget_sharing_enabled": True
+        "is_adset_budget_sharing_enabled": True,
+        "bid_strategy": "LOWEST_COST_WITHOUT_CAP",
     }
 
     response = requests.post(
