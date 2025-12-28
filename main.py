@@ -243,3 +243,136 @@ logger.info(
     "MAIN.PY CARREGADO COM SUCESSO — "
     "WEB SERVICE ATIVO | WORKER PRESERVADO | BOOT-SAFE OK"
 )
+# =========================================================
+# FASE 3 — CAMADA FINANCEIRA / ESTRATÉGICA (LEITURA GOVERNADA)
+# ROBO GLOBAL AI — BACKEND
+# Parte 1/2 — Endpoints + Contratos Humanos
+# =========================================================
+
+from fastapi import Depends, HTTPException
+from datetime import datetime
+from typing import Dict, Any
+
+# ------------------------------------------------------------------
+# DEPENDÊNCIA DE GOVERNANÇA (somente leitura)
+# ------------------------------------------------------------------
+def governanca_read_only():
+    # Hook institucional — aqui não existe escrita nem execução
+    return True
+
+
+# ------------------------------------------------------------------
+# HELPERS INTERNOS (SAFE)
+# ------------------------------------------------------------------
+def _safe_number(v):
+    try:
+        return float(v)
+    except Exception:
+        return 0.0
+
+
+# ------------------------------------------------------------------
+# FASE 3 — STATUS FINANCEIRO GLOBAL (LEITURA HUMANA)
+# ------------------------------------------------------------------
+@app.get("/dashboard/fase3/status", dependencies=[Depends(governanca_read_only)])
+def fase3_status():
+    """
+    Visão executiva do estado financeiro do Robô.
+    Nenhuma métrica técnica, apenas leitura humana.
+    """
+    try:
+        # tabela: publico.estado_economico
+        res = supabase.table("estado_economico").select("*").order("created_at", desc=True).limit(1).execute()
+        row = res.data[0] if res.data else {}
+
+        return {
+            "fase": "FASE_3_FINANCEIRA",
+            "estado_financeiro": row.get("estado", "INDEFINIDO"),
+            "capital_atual": _safe_number(row.get("capital_atual")),
+            "capital_maximo": _safe_number(row.get("capital_maximo")),
+            "resultado_acumulado": _safe_number(row.get("resultado_acumulado")),
+            "risco_atual": row.get("risco_atual", "N/A"),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ------------------------------------------------------------------
+# FASE 3 — PLANO FINANCEIRO ATIVO
+# ------------------------------------------------------------------
+@app.get("/dashboard/fase3/plano", dependencies=[Depends(governanca_read_only)])
+def fase3_plano_financeiro():
+    """
+    Plano financeiro vigente (leitura estratégica).
+    """
+    try:
+        res = supabase.table("plano_diario").select("*").order("created_at", desc=True).limit(1).execute()
+        row = res.data[0] if res.data else {}
+
+        return {
+            "plano": row.get("nome_plano", "SEM_PLANO_ATIVO"),
+            "objetivo": row.get("objetivo", "N/A"),
+            "limite_risco": row.get("limite_risco"),
+            "estrategia": row.get("estrategia"),
+            "status": row.get("status", "INDEFINIDO"),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ------------------------------------------------------------------
+# FASE 3 — ESCALA FINANCEIRA
+# ------------------------------------------------------------------
+@app.get("/dashboard/fase3/escala", dependencies=[Depends(governanca_read_only)])
+def fase3_escala():
+    """
+    Estado da escala financeira do robô.
+    """
+    try:
+        res = supabase.table("escala_financeira").select("*").order("created_at", desc=True).limit(1).execute()
+        row = res.data[0] if res.data else {}
+
+        return {
+            "escala_ativa": row.get("escala_ativa", False),
+            "nivel_escala": row.get("nivel", 0),
+            "criterio": row.get("criterio", "N/A"),
+            "ultima_decisao": row.get("ultima_decisao", "N/A"),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+# =========================
+# FASE 3 — DASHBOARD FINANCEIRO (LEITURA HUMANA)
+# =========================
+
+from fastapi import Depends
+
+@app.get("/dashboard/fase3/overview")
+def dashboard_fase3_overview():
+    """
+    FASE 3 — Leitura humana financeira e estratégica
+    Sem métricas técnicas, sem logs brutos
+    """
+
+    try:
+        # Exemplos de leitura a partir do Supabase (ajuste se nomes divergirem)
+        estado = supabase.table("estado_economico").select("*").order("created_at", desc=True).limit(1).execute()
+        escala = supabase.table("escala_financeira").select("*").order("created_at", desc=True).limit(1).execute()
+        plano = supabase.table("plano_diario").select("*").order("created_at", desc=True).limit(1).execute()
+
+        return {
+            "fase": "FASE_3",
+            "status_financeiro": estado.data[0] if estado.data else {},
+            "escala": escala.data[0] if escala.data else {},
+            "plano_ativo": plano.data[0] if plano.data else {},
+            "mensagem": "Leitura financeira sob governança ativa"
+        }
+
+    except Exception as e:
+        return {
+            "fase": "FASE_3",
+            "erro": "Falha ao compor leitura financeira",
+            "detalhe": str(e)
+        }
