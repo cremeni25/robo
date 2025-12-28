@@ -20,6 +20,15 @@ from fastapi.security import APIKeyHeader
 
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
+
+# ==============================
+# Affiliate Platforms Routers
+# ==============================
+from affiliate.hotmart import router as hotmart_router
+from affiliate.eduzz import router as eduzz_router
+from affiliate.monetizze import router as monetizze_router
+from affiliate.clickbank import router as clickbank_router
+
 # =========================================================
 # SETTINGS — BOOT SAFE (NUNCA QUEBRA NO IMPORT)
 # =========================================================
@@ -69,6 +78,14 @@ app = FastAPI(
     title="Robo Global AI",
     version="2025.12.29",
 )
+
+# ==============================
+# Affiliate Platforms
+# ==============================
+app.include_router(hotmart_router)
+app.include_router(eduzz_router)
+app.include_router(monetizze_router)
+app.include_router(clickbank_router)
 
 app.add_middleware(
     CORSMiddleware,
