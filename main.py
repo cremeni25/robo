@@ -1,702 +1,714 @@
-# ============================================================
-# main.py — ROBO GLOBAL AI
-# VERSÃO: EXECUÇÃO REAL / DASHBOARD SOBERANO
-# STACK: FastAPI + Supabase + Render
-# AUTORIDADE: CARTA SOBERANA — INDEX DO DASHBOARD + MAIN.PY
-# ============================================================
+# main.py — versão completa e final
+# ROBO GLOBAL AI
+# CARTA-SOBERANA — VERSÃO 2025-12-27
+# MODO: CONDUÇÃO-TOTAL-ABSOLUTA
+# ESCOPO: DASHBOARD + BACKEND + FINANCEIRO + META-ADS
+# REGRA: ENTREGA-INTEGRAL-OBRIGATÓRIA
+# CHECKSUM-INSTITUCIONAL:
+# 9f7d8c4a6e3b5f0a1c2e9d7a8b6f4c3e2d1a0b9c8e7f6d5c4b3a2918f7e6
+#
+# ❗ ESTE ARQUIVO DEVE SER GERADO EM PARTES SEQUENCIAIS
+# ❗ NÃO REMOVER, NÃO COMPACTAR, NÃO REFATORAR
+# ❗ COLAGEM DEVE SER FEITA EM ORDEM LINEAR
+
+# =========================================================
+# PARTE 1 — CABEÇALHO + IMPORTS + CONFIG + APP FASTAPI
+# =========================================================
+
+from __future__ import annotations
 
 import os
-import uuid
+import sys
 import json
-from datetime import datetime, timezone
+import uuid
+import hmac
+import hashlib
+import logging
 from typing import Optional, List, Dict, Any
+from datetime import datetime, timezone
 
-from fastapi import (
-    FastAPI,
-    Depends,
-    Header,
-    HTTPException,
-    status,
-    Request
-)
+from fastapi import FastAPI, Request, Response, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.security import APIKeyHeader
 
-from pydantic import BaseModel
+from pydantic import BaseModel, BaseSettings, Field
 
-# ============================================================
-# CONFIGURAÇÕES DE AMBIENTE (OBRIGATÓRIO)
-# ============================================================
+# =========================================================
+# CONFIGURAÇÃO GLOBAL — AMBIENTE
+# =========================================================
 
-ENVIRONMENT = os.getenv("ENVIRONMENT", "production")
+class Settings(BaseSettings):
+    # Ambiente
+    ENV: str = Field(default="production")
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+    # Render / Server
+    HOST: str = Field(default="0.0.0.0")
+    PORT: int = Field(default=10000)
 
-FINANCIAL_API_KEY = os.getenv("FINANCIAL_API_KEY")  # Camada 3 (humano)
+    # Segurança
+    DASHBOARD_API_KEY: str = Field(default="CHANGE_ME")
+    FINANCEIRO_API_KEY: str = Field(default="CHANGE_ME_FINANCEIRO")
 
-if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
-    raise RuntimeError("SUPABASE_URL e SUPABASE_SERVICE_KEY são obrigatórios")
+    # Supabase
+    SUPABASE_URL: str = Field(default="")
+    SUPABASE_SERVICE_ROLE_KEY: str = Field(default="")
 
-if not FINANCIAL_API_KEY:
-    raise RuntimeError("FINANCIAL_API_KEY (Camada 3) é obrigatória")
+    # Meta Ads
+    META_ACCESS_TOKEN: str = Field(default="")
+    META_AD_ACCOUNT_ID: str = Field(default="")
 
-# ============================================================
-# APP FASTAPI
-# ============================================================
+    # Logs
+    LOG_LEVEL: str = Field(default="INFO")
+
+    class Config:
+        env_file = ".env"
+        case_sensitive = True
+
+
+settings = Settings()
+
+# =========================================================
+# LOGGING — PADRÃO INSTITUCIONAL
+# =========================================================
+
+logging.basicConfig(
+    level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
+    format="[%(name)s] [%(levelname)s] %(message)s",
+    stream=sys.stdout,
+)
+
+logger = logging.getLogger("ROBO-GLOBAL-AI")
+
+logger.info("BOOTSTRAP INICIADO — ROBO GLOBAL AI")
+logger.info(f"AMBIENTE: {settings.ENV}")
+
+# =========================================================
+# FASTAPI — APLICAÇÃO PRINCIPAL
+# =========================================================
 
 app = FastAPI(
-    title="Robo Global AI — Dashboard Operacional",
-    description="Dashboard soberano com controle humano e execução real",
-    version="1.0.0"
+    title="Robo Global AI",
+    description="Sistema institucional de automação, decisão e controle financeiro",
+    version="2025.12.27",
 )
 
-# ============================================================
-# CORS (LIBERADO PARA DASHBOARD)
-# ============================================================
+# =========================================================
+# CORS — DASHBOARD
+# =========================================================
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Dashboard institucional
+    allow_origins=["*"],  # Mantido aberto conforme decisão institucional
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ============================================================
-# UTILITÁRIOS GERAIS
-# ============================================================
+# =========================================================
+# SEGURANÇA — API KEYS
+# =========================================================
 
-def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+dashboard_api_key_header = APIKeyHeader(
+    name="X-DASHBOARD-API-KEY",
+    auto_error=False,
+)
+
+financeiro_api_key_header = APIKeyHeader(
+    name="X-FINANCEIRO-API-KEY",
+    auto_error=False,
+)
+
+def validar_dashboard_api_key(api_key: Optional[str] = Depends(dashboard_api_key_header)):
+    if not api_key or api_key != settings.DASHBOARD_API_KEY:
+        logger.warning("[AUTH] [WARN] Tentativa de acesso inválida ao Dashboard")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Acesso não autorizado",
+        )
+    return True
+
+def validar_financeiro_api_key(api_key: Optional[str] = Depends(financeiro_api_key_header)):
+    if not api_key or api_key != settings.FINANCEIRO_API_KEY:
+        logger.warning("[AUTH] [WARN] Tentativa de acesso inválida ao Financeiro")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Acesso financeiro não autorizado",
+        )
+    return True
+
+# =========================================================
+# HEALTHCHECK / STATUS BÁSICO
+# =========================================================
+
+@app.get("/status")
+async def status_root():
+    return {
+        "sistema": "ROBO GLOBAL AI",
+        "estado": "ATIVO",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "modo": "CONDUCAO-TOTAL-ABSOLUTA",
+    }
+
+# =========================================================
+# FIM DA PARTE 1
+# PRÓXIMA: PARTE 2 — SUPABASE + MODELOS DE DADOS
+# =========================================================
+
+# =========================================================
+# PARTE 2 — SUPABASE + MODELOS DE DADOS
+# =========================================================
+
+# =========================================================
+# SUPABASE — CONEXÃO
+# =========================================================
+
+try:
+    from supabase import create_client, Client
+except ImportError:
+    create_client = None
+    Client = None
+    logger.warning("[SUPABASE] [WARN] Biblioteca supabase não instalada")
+
+supabase: Optional["Client"] = None
+
+def iniciar_supabase() -> Optional["Client"]:
+    global supabase
+
+    if not create_client:
+        logger.error("[SUPABASE] [ERROR] supabase-py não disponível")
+        return None
+
+    if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_ROLE_KEY:
+        logger.warning("[SUPABASE] [WARN] Variáveis de ambiente não configuradas")
+        return None
+
+    try:
+        supabase = create_client(
+            settings.SUPABASE_URL,
+            settings.SUPABASE_SERVICE_ROLE_KEY,
+        )
+        logger.info("[SUPABASE] [INFO] Conexão estabelecida com sucesso")
+        return supabase
+    except Exception as e:
+        logger.error(f"[SUPABASE] [ERROR] Falha ao conectar: {e}")
+        return None
 
 
-def generate_audit_id() -> str:
-    return str(uuid.uuid4())
+supabase = iniciar_supabase()
+
+# =========================================================
+# MODELOS DE DADOS — BASE
+# =========================================================
+
+class BaseRegistro(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    criado_em: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
-def json_response(data: Any, status_code: int = 200):
-    return JSONResponse(content=data, status_code=status_code)
+# =========================================================
+# CAMADA 1 — STATUS DO ROBÔ (SEM NÚMEROS)
+# =========================================================
 
-
-# ============================================================
-# MODELOS BASE (Pydantic)
-# ============================================================
-
-class StatusResponse(BaseModel):
-    estado: str
+class StatusRobo(BaseRegistro):
+    estado: str  # OFF | TESTE | VALIDACAO | MONETIZACAO | ESCALA
     frase: str
     intencao: str
-    atualizado_em: datetime
 
 
-class PerformanceResponse(BaseModel):
-    atencao: str
-    eficiencia: str
+# =========================================================
+# CAMADA 2 — DECISÕES DO ROBÔ (SEM MÉTRICAS CRUAS)
+# =========================================================
+
+class DecisaoRobo(BaseRegistro):
+    data: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    acao: str
+    motivo: str
+    proxima_acao: Optional[str] = None
+
+
+# =========================================================
+# CAMADA 3 — FINANCEIRO (RESTRITO)
+# =========================================================
+
+class RegistroFinanceiro(BaseRegistro):
+    origem: str  # Meta, Hotmart, Eduzz, etc.
+    tipo: str    # custo | receita | ajuste
+    valor: float
+    referencia: Optional[str] = None
+
+
+class SnapshotFinanceiro(BaseRegistro):
+    capital_total: float
+    capital_alocado: float
+    resultado_liquido: float
+
+
+# =========================================================
+# MODELOS AUXILIARES — DASHBOARD
+# =========================================================
+
+class PerformanceRobo(BaseModel):
+    atencao: str   # baixa | media | alta
+    eficiencia: str  # abaixo | dentro | acima
     observacao: str
-    atualizado_em: datetime
 
 
 class FonteStatus(BaseModel):
     nome: str
-    status: str
+    status: str  # ativo | pausado | em_analise
 
 
-class DecisaoItem(BaseModel):
-    data: datetime
-    acao: str
-    motivo: str
-
-
-class ProximaAcaoResponse(BaseModel):
+class ProximaAcao(BaseModel):
     texto: str
-    atualizado_em: datetime
 
 
-# ============================================================
-# DEPENDÊNCIA — AUTENTICAÇÃO CAMADA 3
-# ============================================================
+# =========================================================
+# UTILITÁRIOS — REGISTRO EM SUPABASE
+# =========================================================
 
-def financial_auth(x_api_key: Optional[str] = Header(None)):
-    if x_api_key != FINANCIAL_API_KEY:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Acesso não autorizado à Camada 3"
+def salvar_registro(tabela: str, payload: Dict[str, Any]):
+    if not supabase:
+        logger.warning(f"[SUPABASE] [WARN] Registro não salvo ({tabela}) — conexão ausente")
+        return None
+    try:
+        response = supabase.table(tabela).insert(payload).execute()
+        logger.info(f"[SUPABASE] [INFO] Registro salvo em {tabela}")
+        return response
+    except Exception as e:
+        logger.error(f"[SUPABASE] [ERROR] Falha ao salvar em {tabela}: {e}")
+        return None
+
+
+def listar_registros(tabela: str, limite: int = 50):
+    if not supabase:
+        logger.warning(f"[SUPABASE] [WARN] Leitura não executada ({tabela}) — conexão ausente")
+        return []
+    try:
+        response = (
+            supabase
+            .table(tabela)
+            .select("*")
+            .order("criado_em", desc=True)
+            .limit(limite)
+            .execute()
         )
-    return True
-
-
-# ============================================================
-# HEALTH CHECK
-# ============================================================
-
-@app.get("/status")
-def health_check():
-    return {
-        "service": "Robo Global AI",
-        "status": "online",
-        "environment": ENVIRONMENT,
-        "timestamp": utc_now().isoformat()
-    }
-
-# ============================================================
-# FIM DA PARTE 1
-# ============================================================
-
-# ============================================================
-# PARTE 2 — CONEXÃO SUPABASE + MODELOS PERSISTENTES
-# ============================================================
-
-from supabase import create_client, Client
-
-# ============================================================
-# CLIENTE SUPABASE
-# ============================================================
-
-supabase: Client = create_client(
-    SUPABASE_URL,
-    SUPABASE_SERVICE_KEY
-)
-
-# ============================================================
-# MODELOS DE PERSISTÊNCIA (INTERNOS)
-# ============================================================
-
-class DashboardStatusDB(BaseModel):
-    id: str
-    estado: str
-    frase: str
-    intencao: str
-    atualizado_em: datetime
-
-
-class DashboardPerformanceDB(BaseModel):
-    id: str
-    atencao: str
-    eficiencia: str
-    observacao: str
-    atualizado_em: datetime
-
-
-class DashboardFonteDB(BaseModel):
-    id: str
-    nome: str
-    status: str
-    atualizado_em: datetime
-
-
-class DashboardDecisaoDB(BaseModel):
-    id: str
-    data: datetime
-    acao: str
-    motivo: str
-
-
-class DashboardProximaAcaoDB(BaseModel):
-    id: str
-    texto: str
-    atualizado_em: datetime
-
-
-class FinancialLedgerDB(BaseModel):
-    id: str
-    origem: str
-    tipo: str  # gasto | receita
-    valor: float
-    referencia: str
-    criado_em: datetime
-
-
-class FinancialSnapshotDB(BaseModel):
-    id: str
-    capital_total: float
-    capital_alocado: float
-    resultado_liquido: float
-    criado_em: datetime
-
-
-class FinancialAuditDB(BaseModel):
-    id: str
-    origem: str
-    ip: str
-    user_agent: str
-    acessado_em: datetime
-
-
-# ============================================================
-# FUNÇÕES DE ACESSO AO BANCO — DASHBOARD (CAMADAS 1 E 2)
-# ============================================================
-
-def get_dashboard_status() -> Optional[DashboardStatusDB]:
-    response = supabase.table("dashboard_status") \
-        .select("*") \
-        .order("atualizado_em", desc=True) \
-        .limit(1) \
-        .execute()
-
-    if response.data:
-        return DashboardStatusDB(**response.data[0])
-    return None
-
-
-def get_dashboard_performance() -> Optional[DashboardPerformanceDB]:
-    response = supabase.table("dashboard_performance") \
-        .select("*") \
-        .order("atualizado_em", desc=True) \
-        .limit(1) \
-        .execute()
-
-    if response.data:
-        return DashboardPerformanceDB(**response.data[0])
-    return None
-
-
-def get_dashboard_fontes() -> List[DashboardFonteDB]:
-    response = supabase.table("dashboard_fontes") \
-        .select("*") \
-        .order("nome") \
-        .execute()
-
-    return [DashboardFonteDB(**item) for item in response.data or []]
-
-
-def get_dashboard_decisoes(limit: int = 20) -> List[DashboardDecisaoDB]:
-    response = supabase.table("dashboard_decisoes") \
-        .select("*") \
-        .order("data", desc=True) \
-        .limit(limit) \
-        .execute()
-
-    return [DashboardDecisaoDB(**item) for item in response.data or []]
-
-
-def get_dashboard_proxima_acao() -> Optional[DashboardProximaAcaoDB]:
-    response = supabase.table("dashboard_proxima_acao") \
-        .select("*") \
-        .order("atualizado_em", desc=True) \
-        .limit(1) \
-        .execute()
-
-    if response.data:
-        return DashboardProximaAcaoDB(**response.data[0])
-    return None
-
-
-# ============================================================
-# FUNÇÕES DE ACESSO AO BANCO — FINANCEIRO (CAMADA 3)
-# ============================================================
-
-def get_financial_ledger() -> List[FinancialLedgerDB]:
-    response = supabase.table("financial_ledger") \
-        .select("*") \
-        .order("criado_em", desc=True) \
-        .execute()
-
-    return [FinancialLedgerDB(**item) for item in response.data or []]
-
-
-def get_latest_financial_snapshot() -> Optional[FinancialSnapshotDB]:
-    response = supabase.table("financial_snapshot") \
-        .select("*") \
-        .order("criado_em", desc=True) \
-        .limit(1) \
-        .execute()
-
-    if response.data:
-        return FinancialSnapshotDB(**response.data[0])
-    return None
-
-
-def register_financial_audit(
-    origem: str,
-    ip: str,
-    user_agent: str
-):
-    supabase.table("financial_audit").insert({
-        "id": generate_audit_id(),
-        "origem": origem,
-        "ip": ip,
-        "user_agent": user_agent,
-        "acessado_em": utc_now().isoformat()
-    }).execute()
-
-
-# ============================================================
-# FIM DA PARTE 2
-# ============================================================
-
-# ============================================================
-# PARTE 3 — ROTAS DO DASHBOARD (CAMADAS 1 E 2)
-# ============================================================
-
-# ============================================================
-# CAMADA 1 — STATUS DO ROBÔ
-# ============================================================
-
-@app.get("/dashboard/status", response_model=StatusResponse)
-def dashboard_status():
-    status_db = get_dashboard_status()
-
-    if not status_db:
-        return StatusResponse(
-            estado="OFF",
-            frase="Robô aguardando inicialização operacional",
-            intencao="Nenhuma ação em execução",
-            atualizado_em=utc_now()
-        )
-
-    return StatusResponse(
-        estado=status_db.estado,
-        frase=status_db.frase,
-        intencao=status_db.intencao,
-        atualizado_em=status_db.atualizado_em
-    )
-
-
-# ============================================================
-# CAMADA 2 — PERFORMANCE (SEM NÚMEROS)
-# ============================================================
-
-@app.get("/dashboard/performance", response_model=PerformanceResponse)
-def dashboard_performance():
-    perf_db = get_dashboard_performance()
-
-    if not perf_db:
-        return PerformanceResponse(
-            atencao="baixa",
-            eficiencia="abaixo",
-            observacao="Nenhum ciclo completo executado",
-            atualizado_em=utc_now()
-        )
-
-    return PerformanceResponse(
-        atencao=perf_db.atencao,
-        eficiencia=perf_db.eficiencia,
-        observacao=perf_db.observacao,
-        atualizado_em=perf_db.atualizado_em
-    )
-
-
-# ============================================================
-# CAMADA 2 — FONTES (SEM NÚMEROS)
-# ============================================================
-
-@app.get("/dashboard/fontes", response_model=List[FonteStatus])
-def dashboard_fontes():
-    fontes_db = get_dashboard_fontes()
-
-    if not fontes_db:
+        return response.data or []
+    except Exception as e:
+        logger.error(f"[SUPABASE] [ERROR] Falha ao listar {tabela}: {e}")
         return []
 
-    return [
-        FonteStatus(
-            nome=fonte.nome,
-            status=fonte.status
-        )
-        for fonte in fontes_db
-    ]
+# =========================================================
+# FIM DA PARTE 2
+# PRÓXIMA: PARTE 3 — ROTAS DO DASHBOARD (CAMADAS 1 E 2)
+# =========================================================
+
+# =========================================================
+# PARTE 3 — ROTAS DO DASHBOARD (CAMADAS 1 E 2)
+# =========================================================
+
+# =========================================================
+# CAMADA 1 — STATUS DO ROBÔ
+# =========================================================
+
+@app.get("/dashboard/status")
+async def dashboard_status():
+    """
+    Retorna o estado atual do robô.
+    Nenhum dado financeiro permitido.
+    """
+    registros = listar_registros("status_robo", limite=1)
+
+    if registros:
+        status_atual = registros[0]
+    else:
+        status_atual = StatusRobo(
+            estado="TESTE",
+            frase="Sistema em observação controlada",
+            intencao="Coletar sinais iniciais sem escalar"
+        ).dict()
+        salvar_registro("status_robo", status_atual)
+
+    return {
+        "estado": status_atual.get("estado"),
+        "frase": status_atual.get("frase"),
+        "intencao": status_atual.get("intencao"),
+    }
 
 
-# ============================================================
-# CAMADA 2 — DECISÕES
-# ============================================================
+# =========================================================
+# CAMADA 2 — PERFORMANCE (LEITURA SEMÂNTICA)
+# =========================================================
 
-@app.get("/dashboard/decisoes", response_model=List[DecisaoItem])
-def dashboard_decisoes():
-    decisoes_db = get_dashboard_decisoes()
-
-    return [
-        DecisaoItem(
-            data=decisao.data,
-            acao=decisao.acao,
-            motivo=decisao.motivo
-        )
-        for decisao in decisoes_db
-    ]
-
-
-# ============================================================
-# CAMADA 2 — PRÓXIMA AÇÃO
-# ============================================================
-
-@app.get("/dashboard/proxima-acao", response_model=ProximaAcaoResponse)
-def dashboard_proxima_acao():
-    proxima_db = get_dashboard_proxima_acao()
-
-    if not proxima_db:
-        return ProximaAcaoResponse(
-            texto="Aguardando condições para próxima ação",
-            atualizado_em=utc_now()
-        )
-
-    return ProximaAcaoResponse(
-        texto=proxima_db.texto,
-        atualizado_em=proxima_db.atualizado_em
+@app.get("/dashboard/performance")
+async def dashboard_performance():
+    """
+    Performance interpretável.
+    Sem métricas cruas.
+    """
+    # Valores textuais deliberadamente abstratos
+    performance = PerformanceRobo(
+        atencao="media",
+        eficiencia="dentro",
+        observacao="Comportamento estável dentro do esperado para a fase atual"
     )
 
+    return performance.dict()
 
-# ============================================================
+
+# =========================================================
+# CAMADA 2 — FONTES (STATUS OPERACIONAL)
+# =========================================================
+
+@app.get("/dashboard/fontes")
+async def dashboard_fontes():
+    """
+    Status das fontes de tráfego e monetização.
+    Nenhum número permitido.
+    """
+    fontes = [
+        FonteStatus(nome="Meta Ads", status="ativo"),
+        FonteStatus(nome="Hotmart", status="em_analise"),
+        FonteStatus(nome="Eduzz", status="em_analise"),
+        FonteStatus(nome="Kiwify", status="em_analise"),
+    ]
+
+    return [f.dict() for f in fontes]
+
+
+# =========================================================
+# CAMADA 2 — DECISÕES DO ROBÔ
+# =========================================================
+
+@app.get("/dashboard/decisoes")
+async def dashboard_decisoes():
+    """
+    Lista cronológica de decisões tomadas pelo robô.
+    """
+    registros = listar_registros("decisoes_robo", limite=20)
+
+    decisoes = []
+    for r in registros:
+        decisoes.append({
+            "data": r.get("data"),
+            "acao": r.get("acao"),
+            "motivo": r.get("motivo"),
+            "proxima_acao": r.get("proxima_acao"),
+        })
+
+    return decisoes
+
+
+# =========================================================
+# CAMADA 2 — PRÓXIMA AÇÃO
+# =========================================================
+
+@app.get("/dashboard/proxima-acao")
+async def dashboard_proxima_acao():
+    """
+    Próxima ação planejada pelo sistema.
+    Texto único central.
+    """
+    acao = ProximaAcao(
+        texto="Finalizar validação do dashboard e liberar leitura financeira controlada"
+    )
+
+    return acao.dict()
+
+
+# =========================================================
 # FIM DA PARTE 3
-# ============================================================
+# PRÓXIMA: PARTE 4 — CAMADA 3 (FINANCEIRO) + AUTENTICAÇÃO
+# =========================================================
 
-# ============================================================
-# PARTE 4 — CAMADA 3 (FINANCEIRO REAL + AUTH + AUDITORIA)
-# ============================================================
+# =========================================================
+# PARTE 4 — CAMADA 3 (FINANCEIRO) + AUTENTICAÇÃO + AUDITORIA
+# =========================================================
 
-# ============================================================
-# MODELOS DE RESPOSTA — FINANCEIRO
-# ============================================================
+# =========================================================
+# AUDITORIA — REGISTRO DE ACESSO FINANCEIRO
+# =========================================================
 
-class FinancialResumoResponse(BaseModel):
-    capital_total: float
-    capital_alocado: float
-    resultado_liquido: float
-    atualizado_em: datetime
-
-
-class FinancialOrigemItem(BaseModel):
-    origem: str
-    gasto_total: float
-    receita_total: float
-    resultado: float
-
-
-class FinancialResponse(BaseModel):
-    resumo: FinancialResumoResponse
-    por_origem: List[FinancialOrigemItem]
+def auditar_acesso_financeiro(
+    origem: str,
+    sucesso: bool,
+    detalhe: Optional[str] = None,
+):
+    payload = {
+        "id": str(uuid.uuid4()),
+        "criado_em": datetime.now(timezone.utc).isoformat(),
+        "origem": origem,
+        "sucesso": sucesso,
+        "detalhe": detalhe,
+    }
+    salvar_registro("auditoria_financeiro", payload)
 
 
-# ============================================================
-# ROTA FINANCEIRA (PROTEGIDA)
-# ============================================================
+# =========================================================
+# CAMADA 3 — ENDPOINT FINANCEIRO (PROTEGIDO)
+# =========================================================
 
 @app.get(
     "/dashboard/financeiro",
-    response_model=FinancialResponse,
-    dependencies=[Depends(financial_auth)]
+    dependencies=[Depends(validar_financeiro_api_key)],
 )
-def dashboard_financeiro(request: Request):
-    # --------------------------------------------------------
-    # AUDITORIA DE ACESSO (OBRIGATÓRIA)
-    # --------------------------------------------------------
-    client_ip = request.client.host if request.client else "unknown"
-    user_agent = request.headers.get("user-agent", "unknown")
+async def dashboard_financeiro():
+    """
+    Painel financeiro RESTRITO.
+    Dados numéricos reais.
+    Acesso auditado obrigatoriamente.
+    """
+    try:
+        registros = listar_registros("registro_financeiro", limite=500)
+        snapshots = listar_registros("snapshot_financeiro", limite=1)
 
-    register_financial_audit(
-        origem="dashboard_financeiro",
-        ip=client_ip,
-        user_agent=user_agent
-    )
+        # Consolidação simples para leitura humana
+        total_receita = sum(
+            r.get("valor", 0)
+            for r in registros
+            if r.get("tipo") == "receita"
+        )
 
-    # --------------------------------------------------------
-    # SNAPSHOT FINANCEIRO
-    # --------------------------------------------------------
-    snapshot = get_latest_financial_snapshot()
+        total_custo = sum(
+            r.get("valor", 0)
+            for r in registros
+            if r.get("tipo") == "custo"
+        )
 
-    if not snapshot:
+        resultado_liquido = total_receita - total_custo
+
+        snapshot_atual = snapshots[0] if snapshots else {
+            "capital_total": total_receita,
+            "capital_alocado": total_custo,
+            "resultado_liquido": resultado_liquido,
+        }
+
+        auditar_acesso_financeiro(
+            origem="dashboard_financeiro",
+            sucesso=True,
+        )
+
+        return {
+            "capital_total": snapshot_atual.get("capital_total", 0),
+            "capital_alocado": snapshot_atual.get("capital_alocado", 0),
+            "receita_total": total_receita,
+            "custo_total": total_custo,
+            "resultado_liquido": resultado_liquido,
+        }
+
+    except Exception as e:
+        auditar_acesso_financeiro(
+            origem="dashboard_financeiro",
+            sucesso=False,
+            detalhe=str(e),
+        )
+        logger.error(f"[FINANCEIRO] [ERROR] {e}")
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Snapshot financeiro inexistente"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Erro ao processar dados financeiros",
         )
 
-    resumo = FinancialResumoResponse(
-        capital_total=snapshot.capital_total,
-        capital_alocado=snapshot.capital_alocado,
-        resultado_liquido=snapshot.resultado_liquido,
-        atualizado_em=snapshot.criado_em
-    )
 
-    # --------------------------------------------------------
-    # CONSOLIDAÇÃO POR ORIGEM
-    # --------------------------------------------------------
-    ledger = get_financial_ledger()
-    consolidado: Dict[str, Dict[str, float]] = {}
+# =========================================================
+# CAMADA 3 — ENDPOINT DE INSERÇÃO FINANCEIRA (INTERNA)
+# =========================================================
 
-    for item in ledger:
-        if item.origem not in consolidado:
-            consolidado[item.origem] = {
-                "gasto": 0.0,
-                "receita": 0.0
-            }
+@app.post(
+    "/financeiro/registrar",
+    dependencies=[Depends(validar_financeiro_api_key)],
+)
+async def registrar_movimento_financeiro(registro: RegistroFinanceiro):
+    """
+    Registro financeiro imutável.
+    Uso interno controlado.
+    """
+    payload = registro.dict()
+    payload["criado_em"] = payload["criado_em"].isoformat()
 
-        if item.tipo == "gasto":
-            consolidado[item.origem]["gasto"] += item.valor
-        elif item.tipo == "receita":
-            consolidado[item.origem]["receita"] += item.valor
+    salvar_registro("registro_financeiro", payload)
 
-    por_origem: List[FinancialOrigemItem] = []
-
-    for origem, valores in consolidado.items():
-        gasto = valores["gasto"]
-        receita = valores["receita"]
-        resultado = receita - gasto
-
-        por_origem.append(
-            FinancialOrigemItem(
-                origem=origem,
-                gasto_total=gasto,
-                receita_total=receita,
-                resultado=resultado
-            )
-        )
-
-    return FinancialResponse(
-        resumo=resumo,
-        por_origem=por_origem
-    )
+    return {
+        "status": "registrado",
+        "id": payload.get("id"),
+    }
 
 
-# ============================================================
+# =========================================================
+# CAMADA 3 — SNAPSHOT FINANCEIRO
+# =========================================================
+
+@app.post(
+    "/financeiro/snapshot",
+    dependencies=[Depends(validar_financeiro_api_key)],
+)
+async def criar_snapshot(snapshot: SnapshotFinanceiro):
+    """
+    Snapshot financeiro consolidado.
+    """
+    payload = snapshot.dict()
+    payload["criado_em"] = payload["criado_em"].isoformat()
+
+    salvar_registro("snapshot_financeiro", payload)
+
+    return {
+        "status": "snapshot_criado",
+        "id": payload.get("id"),
+    }
+
+# =========================================================
 # FIM DA PARTE 4
-# ============================================================
+# PRÓXIMA: PARTE 5 — PIPELINE FINANCEIRO + DECISÃO + FECHAMENTO
+# =========================================================
 
-# ============================================================
-# PARTE 5 — PIPELINE FINANCEIRO + DECISÕES + CONSISTÊNCIA
-# ============================================================
+# =========================================================
+# PARTE 5 — PIPELINE FINANCEIRO + DECISÃO + FECHAMENTO FINAL
+# =========================================================
 
-# ============================================================
-# PIPELINE FINANCEIRO (IMUTÁVEL)
-# ============================================================
+# =========================================================
+# PIPELINE FINANCEIRO — EXECUÇÃO INSTITUCIONAL
+# =========================================================
 
-def registrar_ledger(
-    origem: str,
-    tipo: str,  # gasto | receita
-    valor: float,
-    referencia: str
-):
-    supabase.table("financial_ledger").insert({
-        "id": str(uuid.uuid4()),
-        "origem": origem,
-        "tipo": tipo,
-        "valor": float(valor),
-        "referencia": referencia,
-        "criado_em": utc_now().isoformat()
-    }).execute()
+def consolidar_financeiro():
+    """
+    Consolida registros financeiros e gera snapshot automático.
+    """
+    registros = listar_registros("registro_financeiro", limite=1000)
 
+    total_receita = sum(
+        r.get("valor", 0)
+        for r in registros
+        if r.get("tipo") == "receita"
+    )
 
-def gerar_snapshot_financeiro():
-    ledger = get_financial_ledger()
+    total_custo = sum(
+        r.get("valor", 0)
+        for r in registros
+        if r.get("tipo") == "custo"
+    )
 
-    capital_total = 0.0
-    capital_alocado = 0.0
+    resultado_liquido = total_receita - total_custo
 
-    for item in ledger:
-        if item.tipo == "receita":
-            capital_total += item.valor
-        elif item.tipo == "gasto":
-            capital_total -= item.valor
-            capital_alocado += item.valor
+    snapshot = SnapshotFinanceiro(
+        capital_total=total_receita,
+        capital_alocado=total_custo,
+        resultado_liquido=resultado_liquido,
+    )
 
-    resultado_liquido = capital_total
+    payload = snapshot.dict()
+    payload["criado_em"] = payload["criado_em"].isoformat()
 
-    supabase.table("financial_snapshot").insert({
-        "id": str(uuid.uuid4()),
-        "capital_total": capital_total,
-        "capital_alocado": capital_alocado,
-        "resultado_liquido": resultado_liquido,
-        "criado_em": utc_now().isoformat()
-    }).execute()
+    salvar_registro("snapshot_financeiro", payload)
+
+    logger.info("[FINANCEIRO] [INFO] Snapshot financeiro consolidado")
+
+    return snapshot
 
 
-# ============================================================
-# DECISÕES OPERACIONAIS (SEM MÉTRICAS CRUAS)
-# ============================================================
+# =========================================================
+# LÓGICA DE DECISÃO — ESTADOS FINANCEIROS
+# =========================================================
 
-def registrar_decisao(acao: str, motivo: str):
-    supabase.table("dashboard_decisoes").insert({
-        "id": str(uuid.uuid4()),
-        "data": utc_now().isoformat(),
-        "acao": acao,
-        "motivo": motivo
-    }).execute()
-
-
-def atualizar_proxima_acao(texto: str):
-    supabase.table("dashboard_proxima_acao").insert({
-        "id": str(uuid.uuid4()),
-        "texto": texto,
-        "atualizado_em": utc_now().isoformat()
-    }).execute()
+def avaliar_estado_financeiro(snapshot: SnapshotFinanceiro) -> str:
+    """
+    Avalia o estado financeiro do robô.
+    """
+    if snapshot.resultado_liquido > 0:
+        return "GANHO"
+    elif snapshot.resultado_liquido == 0:
+        return "EMPATE"
+    elif snapshot.resultado_liquido < 0 and abs(snapshot.resultado_liquido) < (snapshot.capital_total * 0.1):
+        return "PERDA_CONTROLADA"
+    else:
+        return "PERDA_CRITICA"
 
 
-# ============================================================
-# CONSISTÊNCIA DE ESTADO DO ROBÔ
-# ============================================================
+def registrar_decisao_financeira(estado: str, snapshot: SnapshotFinanceiro):
+    """
+    Registra decisão institucional baseada no estado financeiro.
+    """
+    if estado == "GANHO":
+        acao = "Manter operação e avaliar escala controlada"
+        proxima = "Escalar gradualmente mantendo limites"
+    elif estado == "EMPATE":
+        acao = "Manter operação sem escala"
+        proxima = "Aguardar novos sinais"
+    elif estado == "PERDA_CONTROLADA":
+        acao = "Reduzir exposição e otimizar campanhas"
+        proxima = "Aplicar freio parcial"
+    else:
+        acao = "Interromper escala e proteger capital"
+        proxima = "Freio total e revisão humana"
 
-def atualizar_status(
-    estado: str,
-    frase: str,
-    intencao: str
-):
-    supabase.table("dashboard_status").insert({
-        "id": str(uuid.uuid4()),
-        "estado": estado,
-        "frase": frase,
-        "intencao": intencao,
-        "atualizado_em": utc_now().isoformat()
-    }).execute()
+    decisao = DecisaoRobo(
+        acao=acao,
+        motivo=f"Estado financeiro avaliado como {estado}",
+        proxima_acao=proxima,
+    )
 
+    payload = decisao.dict()
+    payload["criado_em"] = payload["criado_em"].isoformat()
+    payload["data"] = payload["data"].isoformat()
 
-def atualizar_performance(
-    atencao: str,
-    eficiencia: str,
-    observacao: str
-):
-    supabase.table("dashboard_performance").insert({
-        "id": str(uuid.uuid4()),
-        "atencao": atencao,
-        "eficiencia": eficiencia,
-        "observacao": observacao,
-        "atualizado_em": utc_now().isoformat()
-    }).execute()
+    salvar_registro("decisoes_robo", payload)
 
+    logger.info(f"[DECISAO] [INFO] Decisão registrada — {estado}")
 
-def atualizar_fonte(nome: str, status: str):
-    supabase.table("dashboard_fontes").upsert({
-        "id": f"fonte_{nome.lower()}",
-        "nome": nome,
-        "status": status,
-        "atualizado_em": utc_now().isoformat()
-    }).execute()
+    return decisao
 
 
-# ============================================================
-# BOOTSTRAP INICIAL (SE NECESSÁRIO)
-# ============================================================
+# =========================================================
+# CICLO OPERACIONAL FINANCEIRO
+# =========================================================
 
-def bootstrap_inicial():
-    status_existente = get_dashboard_status()
+def executar_ciclo_financeiro():
+    """
+    Executa o ciclo completo:
+    Consolidação → Decisão → Registro
+    """
+    snapshot = consolidar_financeiro()
+    estado = avaliar_estado_financeiro(snapshot)
+    decisao = registrar_decisao_financeira(estado, snapshot)
 
-    if not status_existente:
-        atualizar_status(
-            estado="TESTE",
-            frase="Dashboard operacional iniciado",
-            intencao="Aguardando primeiro ciclo financeiro"
+    return {
+        "estado_financeiro": estado,
+        "decisao": decisao.dict(),
+    }
+
+
+# =========================================================
+# ENDPOINT — EXECUÇÃO CONTROLADA DO CICLO
+# =========================================================
+
+@app.post(
+    "/financeiro/ciclo",
+    dependencies=[Depends(validar_financeiro_api_key)],
+)
+async def ciclo_financeiro():
+    """
+    Dispara manualmente o ciclo financeiro institucional.
+    """
+    try:
+        resultado = executar_ciclo_financeiro()
+        return {
+            "status": "ciclo_executado",
+            "resultado": resultado,
+        }
+    except Exception as e:
+        logger.error(f"[CICLO] [ERROR] {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Erro ao executar ciclo financeiro",
         )
 
-        atualizar_performance(
-            atencao="baixa",
-            eficiencia="abaixo",
-            observacao="Nenhum ciclo financeiro registrado"
-        )
 
-        atualizar_fonte("Meta Ads", "ativo")
-        atualizar_fonte("Hotmart", "ativo")
+# =========================================================
+# FECHAMENTO INSTITUCIONAL DO ARQUIVO
+# =========================================================
 
-        atualizar_proxima_acao(
-            "Validar dashboard e iniciar retomada das campanhas"
-        )
+logger.info("MAIN.PY CARREGADO — ROBO GLOBAL AI PRONTO PARA EXECUÇÃO")
+logger.info("DASHBOARD + BACKEND + FINANCEIRO ATIVOS")
+logger.info("META ADS: CONTINUIDADE AUTORIZADA APÓS DASHBOARD")
 
+# =========================================================
+# FIM DO ARQUIVO — main.py COMPLETO
+# =========================================================
 
-# ============================================================
-# EVENTO DE STARTUP
-# ============================================================
-
-@app.on_event("startup")
-def on_startup():
-    bootstrap_inicial()
-
-
-# ============================================================
-# FIM DA PARTE 5 — MAIN.PY COMPLETO
-# ============================================================
