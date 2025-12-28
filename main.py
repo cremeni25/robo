@@ -349,8 +349,12 @@ def fase3_escala():
 
 from fastapi import Depends
 
-@app.get("/dashboard/fase3/overview")
+@app.get(
+    "/dashboard/fase3/overview",
+    dependencies=[Depends(require_financeiro_key)]
+)
 def dashboard_fase3_overview():
+
     """
     FASE 3 — Leitura humana financeira e estratégica
     Sem métricas técnicas, sem logs brutos
