@@ -1,42 +1,52 @@
-# cen.py — Camada de Eventos Neutra (CEN) v1.0
-# Objetivo: Receber eventos neutros, validar, registrar e encaminhar ao Robô Global.
-# Princípios: neutro, burro, auditável, desacoplado.
+# cen.py — Camada de Eventos Neutra (CEN) v1.1
+# OBJETIVO:
+# Receber eventos neutros, validar, registrar e encaminhar ASSÍNCRONAMENTE ao Robô Global.
+#
+# PRINCÍPIOS:
+# - Neutra (não decide)
+# - Burra (não interpreta)
+# - Auditável
+# - Desacoplada
+# - Sem Ads
+# - Sem testes humanos
 
 import os
 import json
 import uuid
 import asyncio
 from datetime import datetime, timezone
-from typing import Literal, Optional, Dict, Any
+from typing import Optional, Dict, Any, Literal
 
+import httpx
 from fastapi import FastAPI, Header, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, validator
 
-# =========================
-# Configurações básicas
-# =========================
+# ======================================================
+# CONFIGURAÇÕES (OBRIGATÓRIAS VIA ENVIRONMENT - RENDER)
+# ======================================================
 
 CEN_API_KEY = os.getenv("CEN_API_KEY", "CHANGE_ME")
-ROBO_ENDPOINT = os.getenv("ROBO_ENDPOINT", "http://robo-interno/event")
+ROBO_ENDPOINT = os.getenv("ROBO_ENDPOINT")        # https://robo-global-api-v2.onrender.com/robo/event
+ROBO_API_KEY = os.getenv("ROBO_API_KEY")          # chave exclusiva CEN -> Robô
 LOG_PATH = os.getenv("CEN_LOG_PATH", "./cen_events.log")
 
-ALLOWED_EVENT_TYPES = {"presence", "intent", "action", "result"}
-ALLOWED_SOURCES = {"web", "api", "platform"}
+if not ROBO_ENDPOINT or not ROBO_API_KEY:
+    raise RuntimeError("ROBO_ENDPOINT e ROBO_API_KEY são obrigatórios")
 
-# =========================
-# App
-# =========================
+# ======================================================
+# APLICAÇÃO
+# ======================================================
 
 app = FastAPI(
     title="CEN — Camada de Eventos Neutra",
-    version="1.0.0",
+    version="1.1.0",
     description="Recebe eventos neutros, valida, registra e encaminha ao Robô Global."
 )
 
-# =========================
-# Modelos
-# =========================
+# ======================================================
+# MODELOS
+# ======================================================
 
 class EventContext(BaseModel):
     page: Optional[str] = None
@@ -67,38 +77,39 @@ class EventPayload(BaseModel):
             raise ValueError("timestamp_utc must be ISO-8601")
         return v
 
-# =========================
-# Utilidades
-# =========================
+# ======================================================
+# UTILIDADES
+# ======================================================
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 def write_log(entry: Dict[str, Any]) -> None:
-    line = json.dumps(entry, ensure_ascii=False)
     with open(LOG_PATH, "a", encoding="utf-8") as f:
-        f.write(line + "\n")
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 async def forward_to_robo(event: Dict[str, Any]) -> None:
     """
-    Encaminhamento assíncrono.
-    IMPORTANTE: a CEN não espera resposta do Robô.
+    Encaminhamento assíncrono e não bloqueante.
+    A CEN NÃO espera resposta do Robô.
     """
     try:
-        # Simulação de envio assíncrono desacoplado.
-        # Aqui você pode substituir por httpx/aiohttp futuramente,
-        # mantendo a regra: não bloquear resposta da CEN.
-        await asyncio.sleep(0)  # yield ao loop
-        # Exemplo (desativado por neutralidade):
-        # async with httpx.AsyncClient(timeout=2.0) as client:
-        #     await client.post(ROBO_ENDPOINT, json=event)
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            await client.post(
+                ROBO_ENDPOINT,
+                json=event,
+                headers={
+                    "X-ROBO-KEY": ROBO_API_KEY,
+                    "Content-Type": "application/json"
+                }
+            )
     except Exception:
-        # Falha no encaminhamento NÃO invalida aceitação do evento
+        # Falha de envio NÃO invalida o evento
         pass
 
-# =========================
-# Endpoints
-# =========================
+# ======================================================
+# ENDPOINTS
+# ======================================================
 
 @app.get("/health")
 def health():
@@ -110,13 +121,13 @@ async def receive_event(
     background_tasks: BackgroundTasks,
     x_cen_key: Optional[str] = Header(None)
 ):
-    # Autenticação simples
+    # Autenticação da origem
     if x_cen_key != CEN_API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid API key")
+        raise HTTPException(status_code=401, detail="Invalid CEN API key")
 
     received_at = utc_now_iso()
 
-    # Registro de aceitação
+    # Registro imutável
     log_entry = {
         "received_at": received_at,
         "event_id": payload.event_id,
