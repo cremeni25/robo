@@ -1,41 +1,50 @@
-# robo_receiver.py — Receptor Oficial do Robô Global (RR) v1.0
-# Objetivo: Receber eventos da CEN, validar, registrar e preparar para processamento futuro.
-# Princípios: seguro, auditável, idempotente, sem decisão.
+# robo_receiver.py — Receptor Oficial do Robô Global v1.1
+# Objetivo: Receber eventos da CEN, validar, registrar, garantir idempotência
+# e ENCAMINHAR INTERNAMENTE para o Motor Interno.
+#
+# Princípios:
+# - Seguro
+# - Auditável
+# - Determinístico
+# - Sem Ads
+# - Sem ações externas
 
 import os
 import json
 import uuid
 from datetime import datetime, timezone
-from typing import Literal, Optional, Dict, Any, Set
+from typing import Optional, Dict, Any, Literal
 
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, validator
 
-# =========================
-# Configurações
-# =========================
+# 🔗 IMPORTAÇÃO DO MOTOR INTERNO
+from motor_interno import MotorInterno
+
+# ======================================================
+# CONFIGURAÇÕES
+# ======================================================
 
 ROBO_API_KEY = os.getenv("ROBO_API_KEY", "CHANGE_ME_ROBO")
 ROBO_LOG_PATH = os.getenv("ROBO_EVENT_LOG_PATH", "./robo_events.log")
 ROBO_SEEN_PATH = os.getenv("ROBO_SEEN_EVENTS_PATH", "./robo_seen_events.log")
 
-ALLOWED_EVENT_TYPES = {"presence", "intent", "action", "result"}
-ALLOWED_SOURCES = {"web", "api", "platform"}
-
-# =========================
-# App
-# =========================
+# ======================================================
+# APP
+# ======================================================
 
 app = FastAPI(
     title="Robô Global — Receptor de Eventos",
-    version="1.0.0",
+    version="1.1.0",
     description="Receptor oficial de eventos provenientes da CEN."
 )
 
-# =========================
-# Modelos
-# =========================
+motor = MotorInterno()
+
+# ======================================================
+# MODELOS
+# ======================================================
 
 class EventContext(BaseModel):
     page: Optional[str] = None
@@ -66,9 +75,9 @@ class EventPayload(BaseModel):
             raise ValueError("timestamp_utc must be ISO-8601")
         return v
 
-# =========================
-# Utilidades
-# =========================
+# ======================================================
+# UTILIDADES
+# ======================================================
 
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -91,22 +100,22 @@ def mark_event_seen(event_id: str) -> None:
     with open(ROBO_SEEN_PATH, "a", encoding="utf-8") as f:
         f.write(event_id + "\n")
 
-# =========================
-# Endpoint
-# =========================
+# ======================================================
+# ENDPOINT
+# ======================================================
 
 @app.post("/robo/event")
 def receive_from_cen(
     payload: EventPayload,
     x_robo_key: Optional[str] = Header(None)
 ):
-    # Autenticação da CEN
+    # 🔐 Autenticação
     if x_robo_key != ROBO_API_KEY:
         raise HTTPException(status_code=401, detail="Invalid ROBÔ API key")
 
     received_at = utc_now_iso()
 
-    # Idempotência
+    # ♻️ Idempotência
     if has_seen_event(payload.event_id):
         write_log(ROBO_LOG_PATH, {
             "received_at": received_at,
@@ -115,18 +124,26 @@ def receive_from_cen(
         })
         return JSONResponse(status_code=202, content={"accepted": True, "duplicate": True})
 
-    # Registro principal
-    write_log(ROBO_LOG_PATH, {
-        "received_at": received_at,
+    # 📝 Registro bruto
+    raw_event = {
         "event_id": payload.event_id,
         "event_type": payload.event_type,
         "event_name": payload.event_name,
         "source": payload.source,
         "timestamp_utc": payload.timestamp_utc,
-        "context": payload.context.dict(),
+        "context": payload.context.dict()
+    }
+
+    write_log(ROBO_LOG_PATH, {
+        "received_at": received_at,
+        **raw_event,
         "status": "accepted"
     })
 
     mark_event_seen(payload.event_id)
+
+    # 🧠 ATIVAÇÃO DO PIPELINE INTERNO
+    # (processamento interno, sem ação externa)
+    motor.process(raw_event)
 
     return JSONResponse(status_code=202, content={"accepted": True})
