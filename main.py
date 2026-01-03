@@ -28,6 +28,7 @@ from affiliate.hotmart import router as hotmart_router
 from affiliate.eduzz import router as eduzz_router
 from affiliate.monetizze import router as monetizze_router
 from affiliate.clickbank import router as clickbank_router
+from controlador_acao_externa import router as acquisition_router
 
 # =========================================================
 # SETTINGS — BOOT SAFE (NUNCA QUEBRA NO IMPORT)
@@ -86,6 +87,7 @@ app.include_router(hotmart_router)
 app.include_router(eduzz_router)
 app.include_router(monetizze_router)
 app.include_router(clickbank_router)
+app.include_router(acquisition_router)
 
 app.add_middleware(
     CORSMiddleware,
