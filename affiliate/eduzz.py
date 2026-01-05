@@ -1,60 +1,22 @@
-import json
+from fastapi import APIRouter, Request, HTTPException
+import hmac
+import hashlib
 import os
-from datetime import datetime, timezone
-from typing import Dict, Any
 
-from fastapi import APIRouter, Request, HTTPException, status
+router = APIRouter()
 
-EDUZZ_WEBHOOK_TOKEN = os.getenv("EDUZZ_WEBHOOK_TOKEN")
-EDUZZ_ORIGIN = "EDUZZ"
+EDUZZ_WEBHOOK_SECRET = os.getenv("EDUZZ_WEBHOOK_SECRET")
 
-router = APIRouter(prefix="/webhook/eduzz", tags=["Eduzz"])
-
-def log(origem: str, nivel: str, mensagem: str, extra: Dict[str, Any] | None = None):
-payload = {
-"timestamp": datetime.now(timezone.utc).isoformat(),
-"origem": origem,
-"nivel": nivel,
-"mensagem": mensagem,
-}
-if extra is not None:
-payload["extra"] = extra
-print(json.dumps(payload, ensure_ascii=False))
-
-def validar_token(headers: Dict[str, str]) -> bool:
-token = headers.get("Authorization") or headers.get("X-Eduzz-Token")
-if token is None:
-return False
-return token.replace("Bearer ", "") == EDUZZ_WEBHOOK_TOKEN
-
-def normalizar_evento(evento: Dict[str, Any]) -> Dict[str, Any]:
-data = evento.get("data", {})
-return {
-"origem": EDUZZ_ORIGIN,
-"evento": evento.get("event"),
-"status": data.get("status"),
-"transacao_id": data.get("transaction_id"),
-"financeiro": {
-"valor": float(data.get("value", 0)),
-"moeda": data.get("currency", "BRL"),
-},
-"timestamp_ingestao": datetime.now(timezone.utc).isoformat(),
-"raw": evento,
-}
-
-@router.post("", status_code=status.HTTP_200_OK)
-async def webhook_eduzz(request: Request):
-if not EDUZZ_WEBHOOK_TOKEN:
-raise HTTPException(status_code=503)
-
-```
-if not validar_token(request.headers):
-    raise HTTPException(status_code=401)
-
-payload = await request.json()
-evento = normalizar_evento(payload)
-
-log(EDUZZ_ORIGIN, "INFO", "Evento recebido", {"transacao_id": evento.get("transacao_id")})
-
-return {"status": "ok"}
-```
+@router.post("/webhook/eduzz")
+async def eduzz_webhook(request: Request):
+    if not EDUZZ_WEBHOOK_SECRET:
+        raise HTTPException(status_code=500)
+    signature = request.headers.get("X-Eduzz-Signature")
+    if not signature:
+        raise HTTPException(status_code=401)
+    body = await request.body()
+    expected = hmac.new(EDUZZ_WEBHOOK_SECRET.encode(), body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, signature):
+        raise HTTPException(status_code=401)
+    payload = await request.json()
+    return {"status": "ok", "platform": "eduzz", "event": payload}
