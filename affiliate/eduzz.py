@@ -69,15 +69,4 @@ if not EDUZZ_WEBHOOK_TOKEN:
 raise HTTPException(status_code=503, detail="EDUZZ_WEBHOOK_TOKEN não configurado")
 
 
-if not validar_token(request.headers):
-raise HTTPException(status_code=401, detail="Token EDUZZ inválido")
-
-
-payload = await request.json()
-evento = normalizar_evento(payload)
-
-
-log(EDUZZ_ORIGIN, "INFO", "Evento recebido", {"transacao_id": evento["transacao_id"]})
-
-
 return {"status": "ok"}
