@@ -14,7 +14,7 @@ import logging
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import APIKeyHeader
 
@@ -51,6 +51,14 @@ class Settings(BaseSettings):
     SUPABASE_URL: Optional[str] = None
     SUPABASE_SERVICE_ROLE_KEY: Optional[str] = None
 
+    # Webhooks Afiliados
+    HOTMART_WEBHOOK_SECRET: Optional[str] = None
+    EDUZZ_WEBHOOK_TOKEN: Optional[str] = None
+    MONETIZZE_WEBHOOK_TOKEN: Optional[str] = None
+
+    # Core
+    CORE_ATUALIZAR_URL: Optional[str] = None
+
     LOG_LEVEL: str = "INFO"
 
     class Config:
@@ -59,6 +67,37 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# =========================================================
+# 🔐 BLOCO 1 — INFRA WEBHOOKS (BOOT-SAFE)
+# =========================================================
+import hmac
+import hashlib
+import requests
+
+try:
+    from supabase import create_client, Client
+except Exception:
+    create_client = None
+    Client = None
+
+# Segredos (do Render)
+HOTMART_WEBHOOK_SECRET = settings.HOTMART_WEBHOOK_SECRET
+EDUZZ_WEBHOOK_TOKEN = settings.EDUZZ_WEBHOOK_TOKEN
+MONETIZZE_WEBHOOK_TOKEN = settings.MONETIZZE_WEBHOOK_TOKEN
+STRIPE_WEBHOOK_SECRET = settings.STRIPE_WEBHOOK_SECRET
+
+# Supabase dedicado aos webhooks (não conflita com o supabase do dashboard)
+supabase_webhooks = None
+if create_client and settings.SUPABASE_URL and settings.SUPABASE_SERVICE_ROLE_KEY:
+    try:
+        supabase_webhooks = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_ROLE_KEY)
+    except Exception:
+        supabase_webhooks = None
+
+# Endpoint do Core (/atualizar)
+CORE_ATUALIZAR_URL = settings.CORE_ATUALIZAR_URL or "http://localhost:8000/atualizar"
+
 # =========================================================
 # LOGGING
 # =========================================================
@@ -71,6 +110,7 @@ logging.basicConfig(
 
 logger = logging.getLogger("ROBO-GLOBAL-AI")
 logger.info("BOOT OK — ROBO GLOBAL AI (WEB SERVICE)")
+
 # =========================================================
 # FASTAPI APP (WEB SERVICE)
 # =========================================================
@@ -95,9 +135,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 # =========================================================
 # SEGURANÇA — BOOT SAFE
-# Validação ocorre SOMENTE ao acessar rotas protegidas
 # =========================================================
 
 dashboard_key = APIKeyHeader(
@@ -137,14 +177,10 @@ def require_financeiro_key(key: Optional[str] = Depends(financeiro_key)):
             detail="Chave financeira inválida"
         )
     return True
+
 # =========================================================
 # SUPABASE — BOOT SAFE (opcional no boot)
 # =========================================================
-
-try:
-    from supabase import create_client
-except Exception:
-    create_client = None
 
 supabase = None
 
@@ -164,7 +200,6 @@ if (
         logger.error(f"SUPABASE ERRO — cliente não inicializado: {e}")
 else:
     logger.warning("SUPABASE — variáveis ausentes ou cliente indisponível")
-
 
 # =========================================================
 # MODELOS BASE
@@ -186,6 +221,7 @@ class DecisaoEstrategica(RegistroBase):
     motivo: str
     origem: Optional[str] = None
     proxima_acao: Optional[str] = None
+
 # =========================================================
 # ROTAS PÚBLICAS — STATUS INSTITUCIONAL
 # =========================================================
@@ -199,8 +235,9 @@ async def status_root():
         "boot_safe": True,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
+
 # =========================================================
-# DASHBOARD HUMANO — CAMADA 1 (LEITURA EXECUTIVA)
+# DASHBOARD HUMANO — CAMADA 1
 # =========================================================
 
 @app.get("/dashboard/status")
@@ -210,8 +247,9 @@ async def dashboard_status():
         "mensagem": "Sistema operacional sob governança ativa",
         "intencao_atual": "Estabilizar núcleo e avançar Meta Ads"
     }
+
 # =========================================================
-# DASHBOARD HUMANO — CAMADA 2 (DECISÃO)
+# DASHBOARD HUMANO — CAMADA 2
 # =========================================================
 
 @app.get("/dashboard/proxima-acao")
@@ -220,32 +258,21 @@ async def dashboard_proxima_acao():
         "proxima_acao": "Retomar execução Meta Ads após validação do núcleo",
         "motivo": "Infraestrutura estabilizada e dashboard operacional"
     }
+
 @app.get("/dashboard/decisoes")
 async def dashboard_decisoes():
-    # leitura simples — não técnica
-    return {
-        "decisoes": []
-    }
+    return {"decisoes": []}
+
 @app.get("/dashboard/fontes")
 async def dashboard_fontes():
-    return {
-        "fontes_ativas": [
-            "Meta Ads",
-            "Hotmart",
-            "Eduzz",
-            "Kiwify"
-        ]
-    }
+    return {"fontes_ativas": ["Meta Ads", "Hotmart", "Eduzz", "Kiwify"]}
+
 # =========================================================
 # DASHBOARD — CAMADA 3 (FINANCEIRO) — PROTEGIDA
 # =========================================================
 
-@app.get(
-    "/dashboard/financeiro",
-    dependencies=[Depends(require_financeiro_key)]
-)
+@app.get("/dashboard/financeiro", dependencies=[Depends(require_financeiro_key)])
 async def dashboard_financeiro():
-    # leitura financeira resumida (governança)
     return {
         "capital_total": 0,
         "capital_alocado": 0,
@@ -254,6 +281,7 @@ async def dashboard_financeiro():
         "resultado_liquido": 0,
         "status": "CAMADA_PROTEGIDA_OK"
     }
+
 # =========================================================
 # ENCERRAMENTO
 # =========================================================
@@ -262,48 +290,25 @@ logger.info(
     "MAIN.PY CARREGADO COM SUCESSO — "
     "WEB SERVICE ATIVO | WORKER PRESERVADO | BOOT-SAFE OK"
 )
+
 # =========================================================
-# FASE 3 — CAMADA FINANCEIRA / ESTRATÉGICA (LEITURA GOVERNADA)
-# ROBO GLOBAL AI — BACKEND
-# Parte 1/2 — Endpoints + Contratos Humanos
+# FASE 3 — CAMADA FINANCEIRA / ESTRATÉGICA
 # =========================================================
 
-from fastapi import Depends, HTTPException
-from datetime import datetime
-from typing import Dict, Any
-
-# ------------------------------------------------------------------
-# DEPENDÊNCIA DE GOVERNANÇA (somente leitura)
-# ------------------------------------------------------------------
 def governanca_read_only():
-    # Hook institucional — aqui não existe escrita nem execução
     return True
 
-
-# ------------------------------------------------------------------
-# HELPERS INTERNOS (SAFE)
-# ------------------------------------------------------------------
 def _safe_number(v):
     try:
         return float(v)
     except Exception:
         return 0.0
 
-
-# ------------------------------------------------------------------
-# FASE 3 — STATUS FINANCEIRO GLOBAL (LEITURA HUMANA)
-# ------------------------------------------------------------------
 @app.get("/dashboard/fase3/status", dependencies=[Depends(governanca_read_only)])
 def fase3_status():
-    """
-    Visão executiva do estado financeiro do Robô.
-    Nenhuma métrica técnica, apenas leitura humana.
-    """
     try:
-        # tabela: publico.estado_economico
         res = supabase.table("estado_economico").select("*").order("created_at", desc=True).limit(1).execute()
         row = res.data[0] if res.data else {}
-
         return {
             "fase": "FASE_3_FINANCEIRA",
             "estado_financeiro": row.get("estado", "INDEFINIDO"),
@@ -316,19 +321,11 @@ def fase3_status():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-# ------------------------------------------------------------------
-# FASE 3 — PLANO FINANCEIRO ATIVO
-# ------------------------------------------------------------------
 @app.get("/dashboard/fase3/plano", dependencies=[Depends(governanca_read_only)])
 def fase3_plano_financeiro():
-    """
-    Plano financeiro vigente (leitura estratégica).
-    """
     try:
         res = supabase.table("plano_diario").select("*").order("created_at", desc=True).limit(1).execute()
         row = res.data[0] if res.data else {}
-
         return {
             "plano": row.get("nome_plano", "SEM_PLANO_ATIVO"),
             "objetivo": row.get("objetivo", "N/A"),
@@ -340,19 +337,11 @@ def fase3_plano_financeiro():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
-# ------------------------------------------------------------------
-# FASE 3 — ESCALA FINANCEIRA
-# ------------------------------------------------------------------
 @app.get("/dashboard/fase3/escala", dependencies=[Depends(governanca_read_only)])
 def fase3_escala():
-    """
-    Estado da escala financeira do robô.
-    """
     try:
         res = supabase.table("escala_financeira").select("*").order("created_at", desc=True).limit(1).execute()
         row = res.data[0] if res.data else {}
-
         return {
             "escala_ativa": row.get("escala_ativa", False),
             "nivel_escala": row.get("nivel", 0),
@@ -362,29 +351,13 @@ def fase3_escala():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-# =========================
-# FASE 3 — DASHBOARD FINANCEIRO (LEITURA HUMANA)
-# =========================
 
-from fastapi import Depends
-
-@app.get(
-    "/dashboard/fase3/overview",
-    dependencies=[Depends(require_financeiro_key)]
-)
+@app.get("/dashboard/fase3/overview", dependencies=[Depends(require_financeiro_key)])
 def dashboard_fase3_overview():
-
-    """
-    FASE 3 — Leitura humana financeira e estratégica
-    Sem métricas técnicas, sem logs brutos
-    """
-
     try:
-        # Exemplos de leitura a partir do Supabase (ajuste se nomes divergirem)
         estado = supabase.table("estado_economico").select("*").order("created_at", desc=True).limit(1).execute()
         escala = supabase.table("escala_financeira").select("*").order("created_at", desc=True).limit(1).execute()
         plano = supabase.table("plano_diario").select("*").order("created_at", desc=True).limit(1).execute()
-
         return {
             "fase": "FASE_3",
             "status_financeiro": estado.data[0] if estado.data else {},
@@ -392,7 +365,6 @@ def dashboard_fase3_overview():
             "plano_ativo": plano.data[0] if plano.data else {},
             "mensagem": "Leitura financeira sob governança ativa"
         }
-
     except Exception as e:
         return {
             "fase": "FASE_3",
