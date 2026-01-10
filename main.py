@@ -371,3 +371,77 @@ def dashboard_fase3_overview():
             "erro": "Falha ao compor leitura financeira",
             "detalhe": str(e)
         }
+# =========================================================
+# 🔥 BLOCO 2 — HOTMART WEBHOOK
+# =========================================================
+
+@app.post("/webhook/hotmart")
+async def webhook_hotmart(request: Request):
+    if not HOTMART_WEBHOOK_SECRET:
+        raise HTTPException(status_code=500, detail="HOTMART_WEBHOOK_SECRET não configurado")
+
+    payload = await request.body()
+    signature = request.headers.get("X-Hotmart-Hmac-SHA256")
+
+    if not signature:
+        raise HTTPException(status_code=401, detail="Assinatura Hotmart ausente")
+
+    expected = hmac.new(
+        HOTMART_WEBHOOK_SECRET.encode(),
+        payload,
+        hashlib.sha256
+    ).hexdigest()
+
+    if not hmac.compare_digest(expected, signature):
+        raise HTTPException(status_code=401, detail="Assinatura inválida")
+
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="JSON inválido")
+
+    # ===============================
+    # 🔄 NORMALIZAÇÃO HOTMART
+    # ===============================
+    event = data.get("event", "")
+    purchase = data.get("data", {})
+
+    produto_id = str(purchase.get("product", {}).get("id"))
+    valor = float(purchase.get("purchase", {}).get("price", 0))
+    comissao = float(purchase.get("commissions", {}).get("value", 0))
+    status_venda = purchase.get("status", "unknown")
+
+    evento_normalizado = {
+        "plataforma": "hotmart",
+        "produto_externo_id": produto_id,
+        "valor": valor,
+        "comissao": comissao,
+        "status": status_venda,
+        "evento": event,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+    # ===============================
+    # 🧠 REGISTRO NO SUPABASE
+    # ===============================
+    if supabase_webhooks:
+        try:
+            supabase_webhooks.table("produto_metrica_historico").insert(evento_normalizado).execute()
+        except Exception as e:
+            logger.error(f"HOTMART → erro ao gravar no Supabase: {e}")
+
+    # ===============================
+    # 🧠 ENVIO PARA O CORE
+    # ===============================
+    try:
+        requests.post(
+            CORE_ATUALIZAR_URL,
+            json=evento_normalizado,
+            timeout=5
+        )
+    except Exception as e:
+        logger.error(f"HOTMART → erro ao enviar ao Core: {e}")
+
+    logger.info(f"HOTMART OK → {evento_normalizado}")
+
+    return {"status": "ok"}
