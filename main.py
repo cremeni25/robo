@@ -386,14 +386,18 @@ async def webhook_hotmart(request: Request):
     if not signature:
         raise HTTPException(status_code=401, detail="Assinatura Hotmart ausente")
 
-    expected = hmac.new(
-        HOTMART_WEBHOOK_SECRET.encode(),
-        payload,
-        hashlib.sha256
-    ).hexdigest()
+   import base64
 
-    if not hmac.compare_digest(expected, signature):
-        raise HTTPException(status_code=401, detail="Assinatura inválida")
+digest = hmac.new(
+    HOTMART_WEBHOOK_SECRET.encode(),
+    payload,
+    hashlib.sha256
+).digest()
+
+expected = base64.b64encode(digest).decode()
+
+if not hmac.compare_digest(expected, signature):
+    raise HTTPException(status_code=401, detail="Assinatura inválida")
 
     try:
         data = await request.json()
