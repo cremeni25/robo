@@ -1,42 +1,42 @@
 from fastapi import APIRouter, Request, HTTPException
-import hmac
-import hashlib
-import base64
-import json
 import os
 import logging
 
 router = APIRouter()
-logger = logging.getLogger("ROBO-GLOBAL-AI")
 
 HOTMART_WEBHOOK_SECRET = os.getenv("HOTMART_WEBHOOK_SECRET")
 
 @router.post("/webhook/hotmart")
 async def hotmart_webhook(request: Request):
+    # 1️⃣ Verifica se a chave existe no ambiente
     if not HOTMART_WEBHOOK_SECRET:
-        raise HTTPException(status_code=500, detail="Secret ausente")
+        logging.error("HOTMART_WEBHOOK_SECRET não configurado no ambiente")
+        raise HTTPException(status_code=500, detail="Hotmart secret not configured")
 
-    signature = request.headers.get("X-Hotmart-Hmac-SHA256")
-    if not signature:
-        raise HTTPException(status_code=401, detail="Assinatura ausente")
+    # 2️⃣ Lê o header Authorization
+    auth = request.headers.get("Authorization")
 
+    if not auth or not auth.startswith("Bearer "):
+        logging.warning("Hotmart sem header Authorization")
+        raise HTTPException(status_code=401, detail="Missing Authorization")
+
+    # 3️⃣ Extrai o token enviado pela Hotmart
+    token = auth.replace("Bearer ", "").strip()
+
+    # 4️⃣ Valida o token contra o Client Secret
+    if token != HOTMART_WEBHOOK_SECRET:
+        logging.warning("Hotmart token inválido")
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    # 5️⃣ Lê o payload
     payload = await request.json()
 
-    # Hotmart assina o JSON normalizado, não o body cru
-    message = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    logging.info(f"[HOTMART] Evento recebido: {payload.get('event')}")
 
-    digest = hmac.new(
-        HOTMART_WEBHOOK_SECRET.encode(),
-        message,
-        hashlib.sha256
-    ).digest()
-
-    expected = base64.b64encode(digest).decode()
-
-    if not hmac.compare_digest(expected, signature):
-        logger.error("HMAC inválido")
-        raise HTTPException(status_code=401, detail="Assinatura inválida")
-
-    logger.info(f"HOTMART OK | event={payload.get('event')}")
-
-    return {"status": "ok"}
+    # 6️⃣ Retorno de sucesso
+    return {
+        "status": "ok",
+        "platform": "hotmart",
+        "event": payload.get("event"),
+        "transaction": payload.get("data", {}).get("purchase", {}).get("transaction")
+    }
