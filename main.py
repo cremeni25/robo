@@ -58,7 +58,7 @@ def normalizar_evento(payload: Dict[str, Any]) -> Dict[str, Any]:
         "email": payload.get("data", {}).get("buyer", {}).get("email"),
         "produto": payload.get("data", {}).get("product", {}).get("name"),
         "valor": payload.get("data", {}).get("purchase", {}).get("price", {}).get("value"),
-        "moeda": payload.get("data", {}).get("purchase", {}).get("price", {}).get("currency"),
+        "moeda": payload.get("data", {}).get("purchase", {}).get("price", {}).get("currency_value"),
         "data": datetime.utcnow().isoformat()
     }
 
@@ -78,16 +78,13 @@ def processar_evento(evento: Dict[str, Any]):
 # ============================================================
 
 def validar_hotmart_hmac(raw_body: bytes, header_signature: str):
-    """
-    Hotmart envia no header algo como:
-    X-Hotmart-Hmac-SHA256: <hash>
-
-    IMPORTANTE:
-    Não vem com 'sha256=' no início.
-    """
     if not HOTMART_HMAC_SECRET:
         log("SECURITY", "ERROR", "HOTMART_HMAC_SECRET não configurado")
         raise HTTPException(status_code=500, detail="HMAC secret not configured")
+
+    # Hotmart envia no formato: sha256=HASH
+    if header_signature.startswith("sha256="):
+        header_signature = header_signature.replace("sha256=", "")
 
     expected = hmac.new(
         HOTMART_HMAC_SECRET.encode(),
