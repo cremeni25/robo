@@ -1,4 +1,6 @@
 from fastapi import APIRouter, Request, HTTPException
+import hmac
+import hashlib
 import os
 import logging
 
@@ -8,35 +10,31 @@ HOTMART_WEBHOOK_SECRET = os.getenv("HOTMART_WEBHOOK_SECRET")
 
 @router.post("/webhook/hotmart")
 async def hotmart_webhook(request: Request):
-    # 1️⃣ Verifica se a chave existe no ambiente
+
     if not HOTMART_WEBHOOK_SECRET:
-        logging.error("HOTMART_WEBHOOK_SECRET não configurado no ambiente")
-        raise HTTPException(status_code=500, detail="Hotmart secret not configured")
+        logging.error("HOTMART_WEBHOOK_SECRET não definido")
+        raise HTTPException(status_code=500, detail="Missing secret")
 
-    # 2️⃣ Lê o header Authorization
-    auth = request.headers.get("Authorization")
+    signature = request.headers.get("X-Hotmart-Signature")
 
-    if not auth or not auth.startswith("Bearer "):
-        logging.warning("Hotmart sem header Authorization")
-        raise HTTPException(status_code=401, detail="Missing Authorization")
+    if not signature:
+        logging.warning("Hotmart não enviou assinatura")
+        raise HTTPException(status_code=401, detail="Missing signature")
 
-    # 3️⃣ Extrai o token enviado pela Hotmart
-    token = auth.replace("Bearer ", "").strip()
+    body = await request.body()
 
-    # 4️⃣ Valida o token contra o Client Secret
-    if token != HOTMART_WEBHOOK_SECRET:
-        logging.warning("Hotmart token inválido")
-        raise HTTPException(status_code=401, detail="Invalid token")
+    expected = hmac.new(
+        HOTMART_WEBHOOK_SECRET.encode(),
+        body,
+        hashlib.sha256
+    ).hexdigest()
 
-    # 5️⃣ Lê o payload
+    if not hmac.compare_digest(expected, signature):
+        logging.warning("Assinatura Hotmart inválida")
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
     payload = await request.json()
 
-    logging.info(f"[HOTMART] Evento recebido: {payload.get('event')}")
+    logging.info(f"[HOTMART] Evento: {payload.get('event')}")
 
-    # 6️⃣ Retorno de sucesso
-    return {
-        "status": "ok",
-        "platform": "hotmart",
-        "event": payload.get("event"),
-        "transaction": payload.get("data", {}).get("purchase", {}).get("transaction")
-    }
+    return {"status": "ok"}
