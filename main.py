@@ -1,4 +1,5 @@
-# main.py — versão final
+# main.py — versão final com GO ROUTER
+
 import os
 import hmac
 import hashlib
@@ -8,6 +9,7 @@ from typing import Dict, Any
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from supabase import create_client, Client
 
 # ============================================================
@@ -20,9 +22,6 @@ ENV = os.getenv("ENV", "prod")
 HOTMART_HMAC_SECRET = os.getenv("HOTMART_HMAC_SECRET", "")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
-
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise RuntimeError("Supabase credentials not set")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -41,57 +40,64 @@ app.add_middleware(
 )
 
 # ============================================================
-# LOGGING
+# LOG
 # ============================================================
 
-def log(origin: str, level: str, message: str):
-    print(f"[{origin}] [{level}] {message}")
+def log(origin, level, msg):
+    print(f"[{origin}] [{level}] {msg}")
 
 # ============================================================
-# CORE
+# GO ROUTER — CORE DE DINHEIRO
 # ============================================================
 
-def normalizar_evento(payload: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        "plataforma": "hotmart",
-        "evento": payload.get("event"),
-        "email": payload.get("data", {}).get("buyer", {}).get("email"),
-        "produto": payload.get("data", {}).get("product", {}).get("name"),
-        "valor": payload.get("data", {}).get("purchase", {}).get("price", {}).get("value"),
-        "moeda": payload.get("data", {}).get("purchase", {}).get("price", {}).get("currency_value"),
-        "data": datetime.utcnow().isoformat()
+@app.get("/go/{slug}")
+def go_router(slug: str, request: Request):
+    try:
+        res = supabase.table("offers").select("*").eq("slug", slug).limit(1).execute()
+    except Exception as e:
+        log("GO", "ERROR", f"Supabase error {e}")
+        raise HTTPException(500, "Database error")
+
+    if not res.data:
+        log("GO", "ERROR", f"Slug not found: {slug}")
+        raise HTTPException(404, "Offer not found")
+
+    offer = res.data[0]
+    target_url = offer["hotmart_url"]
+
+    click = {
+        "slug": slug,
+        "offer_id": offer["id"],
+        "ip": request.client.host if request.client else None,
+        "user_agent": request.headers.get("user-agent"),
+        "ts": datetime.utcnow().isoformat()
     }
 
-def registrar_evento(evento: Dict[str, Any]):
     try:
-        supabase.table("eventos").insert(evento).execute()
-        log("CORE", "INFO", "Evento salvo no Supabase")
+        supabase.table("clicks").insert(click).execute()
+        log("GO", "INFO", f"Click registrado {slug}")
     except Exception as e:
-        log("CORE", "ERROR", f"Erro ao salvar evento: {e}")
+        log("GO", "ERROR", f"Erro ao salvar clique {e}")
 
-def processar_evento(evento: Dict[str, Any]):
-    log("CORE", "INFO", f"Processando evento {evento.get('evento')}")
-    registrar_evento(evento)
+    return RedirectResponse(url=target_url, status_code=302)
 
 # ============================================================
-# SECURITY — HOTMART HMAC
+# HOTMART HMAC
 # ============================================================
 
-def obter_hmac_header(headers: dict) -> str | None:
+def get_hotmart_signature(headers):
     return (
         headers.get("X-Hotmart-Hmac-SHA256")
         or headers.get("X-Hotmart-Hmac")
         or headers.get("X-Hotmart-Hmac-Signature")
     )
 
-def validar_hotmart_hmac(raw_body: bytes, header_signature: str):
-    if not HOTMART_HMAC_SECRET:
-        log("SECURITY", "ERROR", "HOTMART_HMAC_SECRET não configurado")
-        raise HTTPException(status_code=500, detail="HMAC secret not configured")
+def validate_hotmart_hmac(raw_body, signature):
+    if not signature:
+        raise HTTPException(400, "Missing HMAC")
 
-    # Remove sha256= se existir
-    if header_signature.startswith("sha256="):
-        header_signature = header_signature.replace("sha256=", "")
+    if signature.startswith("sha256="):
+        signature = signature.replace("sha256=", "")
 
     expected = hmac.new(
         HOTMART_HMAC_SECRET.encode(),
@@ -99,46 +105,44 @@ def validar_hotmart_hmac(raw_body: bytes, header_signature: str):
         hashlib.sha256
     ).hexdigest()
 
-    if not hmac.compare_digest(expected, header_signature):
-        log("SECURITY", "ERROR", f"HMAC inválido. Esperado {expected} recebido {header_signature}")
-        raise HTTPException(status_code=401, detail="Invalid HMAC")
+    if not hmac.compare_digest(expected, signature):
+        raise HTTPException(401, "Invalid HMAC")
 
 # ============================================================
-# ROUTES
+# WEBHOOK
+# ============================================================
+
+@app.post("/webhook/hotmart")
+async def webhook_hotmart(request: Request):
+    raw = await request.body()
+    sig = get_hotmart_signature(request.headers)
+
+    validate_hotmart_hmac(raw, sig)
+
+    payload = json.loads(raw.decode())
+
+    event = {
+        "platform": "hotmart",
+        "event": payload.get("event"),
+        "email": payload.get("data", {}).get("buyer", {}).get("email"),
+        "product": payload.get("data", {}).get("product", {}).get("name"),
+        "value": payload.get("data", {}).get("purchase", {}).get("price", {}).get("value"),
+        "currency": payload.get("data", {}).get("purchase", {}).get("price", {}).get("currency_value"),
+        "ts": datetime.utcnow().isoformat()
+    }
+
+    supabase.table("events").insert(event).execute()
+    log("HOTMART", "INFO", "Evento salvo")
+
+    return {"status": "ok"}
+
+# ============================================================
+# STATUS
 # ============================================================
 
 @app.get("/status")
 def status():
-    return {
-        "app": APP_NAME,
-        "env": ENV,
-        "time": datetime.utcnow().isoformat(),
-        "status": "ok"
-    }
-
-@app.post("/webhook/hotmart")
-async def webhook_hotmart(request: Request):
-    raw_body = await request.body()
-
-    signature = obter_hmac_header(request.headers)
-    if not signature:
-        log("HOTMART", "ERROR", "Header HMAC não encontrado")
-        raise HTTPException(status_code=400, detail="Missing HMAC header")
-
-    validar_hotmart_hmac(raw_body, signature)
-
-    try:
-        payload = json.loads(raw_body.decode())
-    except Exception:
-        log("HOTMART", "ERROR", "JSON inválido")
-        raise HTTPException(status_code=400, detail="Invalid JSON")
-
-    log("HOTMART", "INFO", "Webhook recebido e validado")
-
-    evento = normalizar_evento(payload)
-    processar_evento(evento)
-
-    return {"status": "received"}
+    return {"system": APP_NAME, "env": ENV, "status": "ok"}
 
 # ============================================================
 # ROOT
@@ -146,4 +150,4 @@ async def webhook_hotmart(request: Request):
 
 @app.get("/")
 def root():
-    return {"system": APP_NAME, "status": "running"}
+    return {"system": APP_NAME, "running": True}
