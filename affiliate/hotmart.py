@@ -2,7 +2,6 @@ from fastapi import APIRouter, Request, HTTPException
 import hmac
 import hashlib
 import os
-import logging
 
 router = APIRouter()
 
@@ -10,31 +9,30 @@ HOTMART_WEBHOOK_SECRET = os.getenv("HOTMART_WEBHOOK_SECRET")
 
 @router.post("/webhook/hotmart")
 async def hotmart_webhook(request: Request):
-
     if not HOTMART_WEBHOOK_SECRET:
-        logging.error("HOTMART_WEBHOOK_SECRET não definido")
-        raise HTTPException(status_code=500, detail="Missing secret")
+        raise HTTPException(status_code=500, detail="Missing HOTMART_WEBHOOK_SECRET")
 
-    signature = request.headers.get("X-Hotmart-Signature")
-
-    if not signature:
-        logging.warning("Hotmart não enviou assinatura")
-        raise HTTPException(status_code=401, detail="Missing signature")
+    header = request.headers.get("X-Hotmart-Hmac-SHA256")
+    if not header:
+        raise HTTPException(status_code=401, detail="Missing HMAC header")
 
     body = await request.body()
 
-    expected = hmac.new(
+    calculated = hmac.new(
         HOTMART_WEBHOOK_SECRET.encode(),
         body,
         hashlib.sha256
     ).hexdigest()
 
-    if not hmac.compare_digest(expected, signature):
-        logging.warning("Assinatura Hotmart inválida")
+    received = header.replace("sha256=", "")
+
+    if not hmac.compare_digest(calculated, received):
         raise HTTPException(status_code=401, detail="Invalid signature")
 
     payload = await request.json()
 
-    logging.info(f"[HOTMART] Evento: {payload.get('event')}")
-
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "platform": "hotmart",
+        "event": payload
+    }
