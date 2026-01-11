@@ -77,12 +77,19 @@ def processar_evento(evento: Dict[str, Any]):
 # SECURITY — HOTMART HMAC
 # ============================================================
 
+def obter_hmac_header(headers: dict) -> str | None:
+    return (
+        headers.get("X-Hotmart-Hmac-SHA256")
+        or headers.get("X-Hotmart-Hmac")
+        or headers.get("X-Hotmart-Hmac-Signature")
+    )
+
 def validar_hotmart_hmac(raw_body: bytes, header_signature: str):
     if not HOTMART_HMAC_SECRET:
         log("SECURITY", "ERROR", "HOTMART_HMAC_SECRET não configurado")
         raise HTTPException(status_code=500, detail="HMAC secret not configured")
 
-    # Hotmart envia no formato: sha256=HASH
+    # Remove sha256= se existir
     if header_signature.startswith("sha256="):
         header_signature = header_signature.replace("sha256=", "")
 
@@ -113,9 +120,9 @@ def status():
 async def webhook_hotmart(request: Request):
     raw_body = await request.body()
 
-    signature = request.headers.get("X-Hotmart-Hmac-SHA256")
+    signature = obter_hmac_header(request.headers)
     if not signature:
-        log("HOTMART", "ERROR", "Header X-Hotmart-Hmac-SHA256 ausente")
+        log("HOTMART", "ERROR", "Header HMAC não encontrado")
         raise HTTPException(status_code=400, detail="Missing HMAC header")
 
     validar_hotmart_hmac(raw_body, signature)
