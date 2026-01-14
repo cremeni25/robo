@@ -659,3 +659,63 @@ declaracao_conclusao()
 #
 # ROBO GLOBAL AI — PRODUÇÃO REAL
 # ===================================================================
+
+# ==========================================================
+# BLOCO FINAL — GO ROUTER (MONETIZAÇÃO DIRETA)
+# ADIÇÃO AUTORIZADA • NÃO ALTERA O NÚCLEO SOBERANO
+# OBJETIVO: EXPOR PRODUTO E PERMITIR PRIMEIRA VENDA
+# ==========================================================
+
+from fastapi.responses import RedirectResponse
+
+@app.get("/go")
+def go_router(produto: str, request: Request):
+    """
+    Roteador direto de monetização.
+    NÃO decide, NÃO bloqueia, NÃO aplica score.
+    Apenas expõe a oferta e redireciona.
+    """
+
+    try:
+        res = (
+            sb.table("offers")
+            .select("*")
+            .eq("slug", produto)
+            .limit(1)
+            .execute()
+        )
+    except Exception as e:
+        log("GO", "ERRO", f"Falha Supabase: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erro interno")
+
+    if not res.data:
+        log("GO", "WARN", f"Produto não encontrado: {produto}")
+        raise HTTPException(status_code=404, detail="Produto não encontrado")
+
+    offer = res.data[0]
+    target_url = offer.get("hotmart_url")
+
+    if not target_url:
+        log("GO", "ERRO", f"Oferta sem URL de destino: {produto}")
+        raise HTTPException(status_code=500, detail="URL de destino inexistente")
+
+    # Registro de clique (observacional)
+    try:
+        sb.table("clicks").insert({
+            "slug": produto,
+            "offer_id": offer.get("id"),
+            "ip": request.client.host if request.client else None,
+            "user_agent": request.headers.get("user-agent"),
+            "ts": utc_now_iso()
+        }).execute()
+    except Exception as e:
+        log("GO", "WARN", f"Falha ao registrar clique: {str(e)}")
+
+    log("GO", "INFO", f"Redirecionamento executado: {produto}")
+
+    return RedirectResponse(url=target_url, status_code=302)
+
+# ==========================================================
+# FIM DO BLOCO GO ROUTER
+# ==========================================================
+
