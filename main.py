@@ -1,4 +1,5 @@
-# main.py — versão final com GO ROUTER
+# main.py — ROBO GLOBAL AI (versão operacional final)
+# Substituição integral do arquivo
 
 import os
 import hmac
@@ -7,9 +8,9 @@ import json
 from datetime import datetime
 from typing import Dict, Any
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 from supabase import create_client, Client
 
 # ============================================================
@@ -43,8 +44,28 @@ app.add_middleware(
 # LOG
 # ============================================================
 
-def log(origin, level, msg):
+def log(origin: str, level: str, msg: str):
     print(f"[{origin}] [{level}] {msg}")
+
+# ============================================================
+# SCORE (LEITURA FINAL)
+# ============================================================
+
+def obter_score_produto(id_produto: str) -> float:
+    try:
+        res = supabase.table("produto_score_atual") \
+            .select("score") \
+            .eq("id_produto", id_produto) \
+            .limit(1) \
+            .execute()
+    except Exception as e:
+        log("SCORE", "ERROR", f"Erro Supabase: {e}")
+        return 0.0
+
+    if not res.data:
+        return 0.0
+
+    return float(res.data[0]["score"])
 
 # ============================================================
 # GO ROUTER — CORE DE DINHEIRO
@@ -52,6 +73,17 @@ def log(origin, level, msg):
 
 @app.get("/go/{slug}")
 def go_router(slug: str, request: Request):
+    return executar_go(slug, request)
+
+
+@app.get("/go")
+def go_router_query(produto: str = Query(None), request: Request = None):
+    if not produto:
+        raise HTTPException(400, "Produto ausente")
+    return executar_go(produto, request)
+
+
+def executar_go(slug: str, request: Request):
     try:
         res = supabase.table("offers").select("*").eq("slug", slug).limit(1).execute()
     except Exception as e:
@@ -63,11 +95,23 @@ def go_router(slug: str, request: Request):
         raise HTTPException(404, "Offer not found")
 
     offer = res.data[0]
+
+    status = offer.get("status", "active")
+    if status != "active":
+        log("GO", "INFO", f"Offer {slug} com status {status}")
+        raise HTTPException(403, "Offer not available")
+
+    score = obter_score_produto(offer["id"])
+    if score < 50:
+        log("GO", "INFO", f"Offer {slug} bloqueada por score {score}")
+        raise HTTPException(403, "Offer blocked by performance")
+
     target_url = offer["hotmart_url"]
 
     click = {
         "slug": slug,
         "offer_id": offer["id"],
+        "score": score,
         "ip": request.client.host if request.client else None,
         "user_agent": request.headers.get("user-agent"),
         "ts": datetime.utcnow().isoformat()
@@ -75,9 +119,22 @@ def go_router(slug: str, request: Request):
 
     try:
         supabase.table("clicks").insert(click).execute()
-        log("GO", "INFO", f"Click registrado {slug}")
     except Exception as e:
         log("GO", "ERROR", f"Erro ao salvar clique {e}")
+
+    decision = {
+        "offer_id": offer["id"],
+        "slug": slug,
+        "decision": "REDIRECT",
+        "target": target_url,
+        "score": score,
+        "ts": datetime.utcnow().isoformat()
+    }
+
+    try:
+        supabase.table("decisions").insert(decision).execute()
+    except Exception as e:
+        log("GO", "ERROR", f"Erro ao salvar decisão {e}")
 
     return RedirectResponse(url=target_url, status_code=302)
 
@@ -92,7 +149,7 @@ def get_hotmart_signature(headers):
         or headers.get("X-Hotmart-Hmac-Signature")
     )
 
-def validate_hotmart_hmac(raw_body, signature):
+def validate_hotmart_hmac(raw_body: bytes, signature: str):
     if not signature:
         raise HTTPException(400, "Missing HMAC")
 
@@ -109,7 +166,7 @@ def validate_hotmart_hmac(raw_body, signature):
         raise HTTPException(401, "Invalid HMAC")
 
 # ============================================================
-# WEBHOOK
+# WEBHOOK HOTMART
 # ============================================================
 
 @app.post("/webhook/hotmart")
@@ -142,7 +199,11 @@ async def webhook_hotmart(request: Request):
 
 @app.get("/status")
 def status():
-    return {"system": APP_NAME, "env": ENV, "status": "ok"}
+    return {
+        "system": APP_NAME,
+        "env": ENV,
+        "status": "ok"
+    }
 
 # ============================================================
 # ROOT
@@ -150,4 +211,7 @@ def status():
 
 @app.get("/")
 def root():
-    return {"system": APP_NAME, "running": True}
+    return {
+        "system": APP_NAME,
+        "running": True
+    }
