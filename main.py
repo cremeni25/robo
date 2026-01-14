@@ -1,6 +1,7 @@
 # main.py — ROBO GLOBAL AI
-# VERSÃO OPERACIONAL — PLATAFORMAS RESTAURADAS
+# ARQUITETURA FINAL — WEBHOOKS DINÂMICOS
 # SUBSTITUIÇÃO INTEGRAL
+# ➜ NUNCA MAIS REFAZER main.py PARA NOVA PLATAFORMA
 
 import os
 import hmac
@@ -25,8 +26,6 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 
 HOTMART_HMAC_SECRET = os.getenv("HOTMART_HMAC_SECRET", "")
-EDUZZ_TOKEN = os.getenv("EDUZZ_TOKEN", "")
-MONETIZZE_TOKEN = os.getenv("MONETIZZE_TOKEN", "")
 CLICKBANK_SECRET = os.getenv("CLICKBANK_SECRET", "")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -53,7 +52,7 @@ def log(origin: str, level: str, msg: str):
     print(f"[{origin}] [{level}] {msg}")
 
 # ============================================================
-# GO ROUTER — SEM BLOQUEIO
+# GO ROUTER (INALTERADO)
 # ============================================================
 
 @app.get("/go/{slug}")
@@ -69,122 +68,72 @@ def go_router_query(produto: str = Query(None), request: Request = None):
 
 
 def executar_go(slug: str, request: Request):
-    try:
-        res = supabase.table("offers").select("*").eq("slug", slug).limit(1).execute()
-    except Exception as e:
-        log("GO", "ERROR", f"Supabase error {e}")
-        raise HTTPException(500, "Database error")
-
+    res = supabase.table("offers").select("*").eq("slug", slug).limit(1).execute()
     if not res.data:
-        log("GO", "ERROR", f"Slug not found: {slug}")
         raise HTTPException(404, "Offer not found")
 
     offer = res.data[0]
-
     if offer.get("status") != "active":
         raise HTTPException(403, "Offer not available")
 
-    target_url = offer["hotmart_url"]
-
-    click = {
+    supabase.table("clicks").insert({
         "slug": slug,
         "offer_id": offer["id"],
         "ip": request.client.host if request.client else None,
         "user_agent": request.headers.get("user-agent"),
         "ts": datetime.utcnow().isoformat()
-    }
-
-    supabase.table("clicks").insert(click).execute()
+    }).execute()
 
     supabase.table("decisions").insert({
         "offer_id": offer["id"],
         "slug": slug,
         "decision": "REDIRECT",
-        "target": target_url,
+        "target": offer["hotmart_url"],
         "ts": datetime.utcnow().isoformat()
     }).execute()
 
-    return RedirectResponse(url=target_url, status_code=302)
+    return RedirectResponse(url=offer["hotmart_url"], status_code=302)
 
 # ============================================================
-# HOTMART
+# HMAC HOTMART (OPCIONAL)
 # ============================================================
 
-def get_hotmart_signature(headers):
-    return headers.get("X-Hotmart-Hmac-SHA256")
-
-def validate_hotmart_hmac(raw_body: bytes, signature: str):
-    if not signature:
-        raise HTTPException(400, "Missing HMAC")
+def validate_hotmart(raw: bytes, headers: Dict[str, Any]):
+    sig = headers.get("X-Hotmart-Hmac-SHA256")
+    if not sig:
+        return True
 
     expected = hmac.new(
         HOTMART_HMAC_SECRET.encode(),
-        raw_body,
+        raw,
         hashlib.sha256
     ).hexdigest()
 
-    if not hmac.compare_digest(expected, signature.replace("sha256=", "")):
-        raise HTTPException(401, "Invalid HMAC")
+    return hmac.compare_digest(expected, sig.replace("sha256=", ""))
 
-@app.post("/webhook/hotmart")
-async def webhook_hotmart(request: Request):
+# ============================================================
+# WEBHOOK UNIVERSAL (CHAVE DA SOLUÇÃO)
+# ============================================================
+
+@app.post("/webhook/{platform}")
+async def webhook_universal(platform: str, request: Request):
     raw = await request.body()
-    validate_hotmart_hmac(raw, get_hotmart_signature(request.headers))
+
+    # validações específicas (se existirem)
+    if platform == "hotmart":
+        if not validate_hotmart(raw, request.headers):
+            raise HTTPException(401, "Invalid HMAC")
+
     payload = json.loads(raw.decode())
 
     supabase.table("events").insert({
-        "platform": "hotmart",
+        "platform": platform,
         "payload": payload,
+        "headers": dict(request.headers),
         "ts": datetime.utcnow().isoformat()
     }).execute()
 
-    return {"status": "ok"}
-
-# ============================================================
-# EDUZZ
-# ============================================================
-
-@app.post("/webhook/eduzz")
-async def webhook_eduzz(request: Request):
-    payload = await request.json()
-
-    supabase.table("events").insert({
-        "platform": "eduzz",
-        "payload": payload,
-        "ts": datetime.utcnow().isoformat()
-    }).execute()
-
-    return {"status": "ok"}
-
-# ============================================================
-# MONETIZZE
-# ============================================================
-
-@app.post("/webhook/monetizze")
-async def webhook_monetizze(request: Request):
-    payload = await request.json()
-
-    supabase.table("events").insert({
-        "platform": "monetizze",
-        "payload": payload,
-        "ts": datetime.utcnow().isoformat()
-    }).execute()
-
-    return {"status": "ok"}
-
-# ============================================================
-# CLICKBANK
-# ============================================================
-
-@app.post("/webhook/clickbank")
-async def webhook_clickbank(request: Request):
-    payload = await request.json()
-
-    supabase.table("events").insert({
-        "platform": "clickbank",
-        "payload": payload,
-        "ts": datetime.utcnow().isoformat()
-    }).execute()
+    log("WEBHOOK", "INFO", f"Evento recebido: {platform}")
 
     return {"status": "ok"}
 
