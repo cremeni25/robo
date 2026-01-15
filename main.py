@@ -15,9 +15,10 @@
 
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import Dict, Any, Optional, List
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import os
 import json
 import uuid
@@ -41,7 +42,7 @@ CAPITAL_MAX = float(os.getenv("CAPITAL_MAX", "10000"))
 RISCO_MAX_PCT = float(os.getenv("RISCO_MAX_PCT", "40"))
 PLATAFORMAS_PERMITIDAS = os.getenv(
     "PLATAFORMAS_PERMITIDAS",
-    "HOTMART,EDUZZ,MONETIZZE,CLICkBANK"
+    "HOTMART,EDUZZ,MONETIZZE,CLICKBANK"
 ).split(",")
 
 # ==========================================================
@@ -116,6 +117,29 @@ class AcaoFinanceiraHumana(BaseModel):
     executado_em: Optional[str] = None
 
 # ==========================================================
+# MODELOS CANÔNICOS — DOR / CONTEXTO / CAMINHO
+# (CAMADA DE INTELIGÊNCIA NEUTRA)
+# ==========================================================
+
+class Dor(BaseModel):
+    codigo: str
+    descricao: Optional[str] = None
+
+class Contexto(BaseModel):
+    origem: Optional[str] = None
+    horario: Optional[str] = None
+    intensidade: Optional[int] = 0
+    sequencia: Optional[List[str]] = []
+
+class Caminho(BaseModel):
+    id: str
+    dor: Dor
+    contexto: Contexto
+    ofertas: List[str]
+    prioridade: float = 0.0
+    atualizado_em: str
+
+# ==========================================================
 # ESTADO GLOBAL DO SISTEMA (SOBERANO)
 # ==========================================================
 
@@ -133,7 +157,11 @@ ESTADO_GLOBAL: Dict[str, Any] = {
 
 def registrar_evento_financeiro(evento: EventoFinanceiro):
     sb.table("eventos_financeiros").insert(evento.dict()).execute()
-    log("FINANCEIRO", "INFO", f"Evento registrado: {evento.plataforma} | {evento.status} | {evento.valor_bruto}")
+    log(
+        "FINANCEIRO",
+        "INFO",
+        f"Evento registrado: {evento.plataforma} | {evento.status} | {evento.valor_bruto}"
+    )
 
 def atualizar_caixa_logico(valor: float):
     ESTADO_GLOBAL["capital_total"] += valor
@@ -176,7 +204,11 @@ def decidir_acao(evento: EventoFinanceiro) -> Dict[str, Any]:
 def executar_decisao(evento: EventoFinanceiro, decisao: Dict[str, Any]):
     if decisao["decisao"] == "ESCALAR":
         atualizar_caixa_logico(evento.valor_bruto)
-        log("EXECUCAO", "INFO", f"Escala autorizada | Valor {evento.valor_bruto} {evento.moeda}")
+        log(
+            "EXECUCAO",
+            "INFO",
+            f"Escala autorizada | Valor {evento.valor_bruto} {evento.moeda}"
+        )
     elif decisao["decisao"] == "DESCARTAR":
         log("EXECUCAO", "WARN", "Evento descartado")
     else:
@@ -240,9 +272,9 @@ def root():
     }
 
 log("SYSTEM", "INFO", f"{APP_NAME} iniciado | instância {INSTANCE_ID}")
-# ===================== FIM DA PARTE 1 ======================
-# ===================== main.py — PARTE 2 / N =====================
-# Integrações Financeiras + Normalização Canônica + Auditoria
+
+# ===================== main.py — PARTE 3 / N =====================
+# Integrações Financeiras • Normalização Canônica • Segurança
 # ================================================================
 
 # ==========================================================
@@ -268,8 +300,16 @@ def normalizar_evento_hotmart(payload: Dict[str, Any]) -> EventoFinanceiro:
     return EventoFinanceiro(
         plataforma="HOTMART",
         oferta=str(payload.get("data", {}).get("product", {}).get("id")),
-        valor_bruto=float(payload.get("data", {}).get("purchase", {}).get("price", {}).get("value", 0)),
-        moeda=payload.get("data", {}).get("purchase", {}).get("price", {}).get("currency", "BRL"),
+        valor_bruto=float(
+            payload.get("data", {})
+            .get("purchase", {})
+            .get("price", {})
+            .get("value", 0)
+        ),
+        moeda=payload.get("data", {})
+              .get("purchase", {})
+              .get("price", {})
+              .get("currency", "BRL"),
         status="GERADO",
         origem_evento=payload.get("event"),
         recebido_em=utc_now_iso()
@@ -404,9 +444,9 @@ def loop_operacional():
 threading.Thread(target=loop_operacional, daemon=True).start()
 
 log("SYSTEM", "INFO", "Integrações financeiras carregadas")
-# ===================== FIM DA PARTE 2 =====================
-# ===================== main.py — PARTE 3 / N =====================
-# Governança por Limites Macro • Risco • Estados Financeiros
+
+# ===================== main.py — PARTE 4 / N =====================
+# Governança • Risco • Estados Financeiros
 # ================================================================
 
 # ==========================================================
@@ -428,9 +468,9 @@ def atualizar_status_financeiro(evento_id: str, novo_status: str):
         raise ValueError("Status financeiro inválido")
 
     sb.table("eventos_financeiros") \
-      .update({"status": novo_status}) \
-      .eq("id", evento_id) \
-      .execute()
+        .update({"status": novo_status}) \
+        .eq("id", evento_id) \
+        .execute()
 
     log("FINANCEIRO", "INFO", f"Status atualizado: {evento_id} → {novo_status}")
 
@@ -555,9 +595,9 @@ def health():
     }
 
 log("SYSTEM", "INFO", "Governança e controle de risco ativados")
-# ===================== FIM DA PARTE 3 =====================
+
 # ===================== main.py — PARTE FINAL / N =====================
-# Consolidação Final • Validação • Checklist • Encerramento
+# Consolidação Final • Validação • GO ROUTER • Encerramento
 # ===================================================================
 
 # ==========================================================
@@ -643,30 +683,50 @@ def declaracao_conclusao():
 declaracao_conclusao()
 
 # ==========================================================
-# ENCERRAMENTO DEFINITIVO DO ARQUIVO
+# GERADOR DE CAMINHOS — SEM ROI, SEM ELIMINAÇÃO
 # ==========================================================
-# Este main.py representa:
-# - Núcleo único, soberano e verticalizado
-# - Execução autônoma sob limites macro
-# - Monetização integrada e obrigatória
-# - Camada financeira humana visível e acionável
-# - Governança, risco e botão nuclear
-#
-# A partir deste ponto:
-# - O sistema é considerado CONCLUÍDO
-# - Evoluções futuras são incrementais
-# - Não há retorno a alinhamentos conceituais
-#
-# ROBO GLOBAL AI — PRODUÇÃO REAL
-# ===================================================================
+
+def gerar_caminho(dor: Dor, contexto: Contexto, ofertas: List[str]) -> Caminho:
+    prioridade = contexto.intensidade * 1.0
+
+    return Caminho(
+        id=str(uuid.uuid4()),
+        dor=dor,
+        contexto=contexto,
+        ofertas=ofertas,
+        prioridade=prioridade,
+        atualizado_em=utc_now_iso()
+    )
+
+# ==========================================================
+# REGISTRO DE CAMINHOS — AUDITORIA, NÃO DECISÃO
+# ==========================================================
+
+def registrar_caminho(caminho: Caminho):
+    sb.table("caminhos").insert({
+        "id": caminho.id,
+        "dor": caminho.dor.codigo,
+        "contexto": caminho.contexto.dict(),
+        "ofertas": caminho.ofertas,
+        "prioridade": caminho.prioridade,
+        "atualizado_em": caminho.atualizado_em
+    }).execute()
+
+def priorizar_caminhos(caminhos: List[Caminho]) -> List[Caminho]:
+    return sorted(caminhos, key=lambda c: c.prioridade, reverse=True)
+
+def interpretar_contexto_clique(eventos: List[Dict[str, Any]]) -> Contexto:
+    return Contexto(
+        origem=eventos[0].get("origem") if eventos else None,
+        horario=utc_now_iso(),
+        intensidade=len(eventos),
+        sequencia=[e.get("slug") for e in eventos]
+    )
 
 # ==========================================================
 # BLOCO FINAL — GO ROUTER (MONETIZAÇÃO DIRETA)
 # ADIÇÃO AUTORIZADA • NÃO ALTERA O NÚCLEO SOBERANO
-# OBJETIVO: EXPOR PRODUTO E PERMITIR PRIMEIRA VENDA
 # ==========================================================
-
-from fastapi.responses import RedirectResponse
 
 @app.get("/go")
 def go_router(produto: str, request: Request):
@@ -675,7 +735,6 @@ def go_router(produto: str, request: Request):
     NÃO decide, NÃO bloqueia, NÃO aplica score.
     Apenas expõe a oferta e redireciona.
     """
-
     try:
         res = (
             sb.table("offers")
@@ -699,7 +758,6 @@ def go_router(produto: str, request: Request):
         log("GO", "ERRO", f"Oferta sem URL de destino: {produto}")
         raise HTTPException(status_code=500, detail="URL de destino inexistente")
 
-    # Registro de clique (observacional)
     try:
         sb.table("clicks").insert({
             "slug": produto,
@@ -712,10 +770,40 @@ def go_router(produto: str, request: Request):
         log("GO", "WARN", f"Falha ao registrar clique: {str(e)}")
 
     log("GO", "INFO", f"Redirecionamento executado: {produto}")
-
     return RedirectResponse(url=target_url, status_code=302)
 
-# ==========================================================
-# FIM DO BLOCO GO ROUTER
-# ==========================================================
+@app.get("/go/caminho")
+def go_caminho(dor_codigo: str, produto: str, request: Request):
+    dor = Dor(codigo=dor_codigo)
 
+    eventos = (
+        sb.table("clicks")
+        .select("*")
+        .eq("slug", produto)
+        .order("ts", desc=True)
+        .limit(10)
+        .execute()
+        .data
+    )
+
+    contexto = interpretar_contexto_clique(eventos)
+    caminho = gerar_caminho(dor, contexto, [produto])
+    registrar_caminho(caminho)
+
+    return {
+        "status": "CAMINHO_REGISTRADO",
+        "caminho_id": caminho.id
+    }
+
+# ==========================================================
+# ENCERRAMENTO DEFINITIVO DO ARQUIVO
+# ==========================================================
+# Este main.py representa:
+# - Núcleo único, soberano e verticalizado
+# - Execução autônoma sob limites macro
+# - Monetização integrada e obrigatória
+# - Camada financeira humana visível e acionável
+# - Governança, risco e botão nuclear
+#
+# ROBO GLOBAL AI — PRODUÇÃO REAL
+# ===================================================================
