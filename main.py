@@ -869,3 +869,32 @@ def listar_nichos_publicos():
     except Exception as e:
         log("CMS", "ERRO", f"Falha ao listar nichos: {str(e)}")
         raise HTTPException(status_code=500, detail="Erro ao buscar nichos")
+
+# ==========================================================
+# PUBLIC — NICHOS GLOBAL (VERSÃO DEFINITIVA)
+# ==========================================================
+
+@app.get("/public/nichos")
+def listar_nichos_publicos():
+    """
+    Endpoint público global.
+    Frontend NÃO acessa banco.
+    Retorna todos os campos necessários.
+    """
+    try:
+        res = (
+            sb.table("nichos")
+            .select("id,title,slug,description,image_url,created_at")
+            .order("title")
+            .execute()
+        )
+
+        return {
+            "status": "OK",
+            "total": len(res.data or []),
+            "data": res.data or []
+        }
+
+    except Exception as e:
+        log("PUBLIC", "ERRO", f"Falha ao listar nichos: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erro ao buscar nichos")
