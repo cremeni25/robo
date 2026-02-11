@@ -803,3 +803,45 @@ def declaracao_conclusao():
     )
 
 declaracao_conclusao()
+
+# ==========================================================
+# CMS MASTER — CAMADA SOBERANA (B1 → B2 TRANSIÇÃO)
+# ==========================================================
+
+MASTER_KEY = os.getenv("MASTER_KEY", "")
+
+def validar_master(request: Request):
+    chave = request.headers.get("x-master-key")
+    if not MASTER_KEY or chave != MASTER_KEY:
+        raise HTTPException(status_code=401, detail="MASTER KEY inválida")
+
+class NichoCMS(BaseModel):
+    title: str
+    slug: str
+    description: Optional[str] = None
+
+
+@app.post("/cms/nichos")
+def cms_criar_nicho(payload: NichoCMS, request: Request):
+    """
+    Criação segura de nichos via CMS.
+    Não altera pipeline soberano.
+    Apenas registra dados editoriais.
+    """
+    validar_master(request)
+
+    try:
+        sb.table("nichos").insert({
+            "title": payload.title,
+            "slug": payload.slug,
+            "description": payload.description,
+            "created_at": utc_now_iso()
+        }).execute()
+
+        log("CMS", "INFO", f"Nicho criado via MASTER: {payload.slug}")
+
+        return {"status": "OK", "slug": payload.slug}
+
+    except Exception as e:
+        log("CMS", "ERRO", f"Falha ao criar nicho: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erro ao inserir nicho")
