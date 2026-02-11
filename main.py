@@ -845,3 +845,27 @@ def cms_criar_nicho(payload: NichoCMS, request: Request):
     except Exception as e:
         log("CMS", "ERRO", f"Falha ao criar nicho: {str(e)}")
         raise HTTPException(status_code=500, detail="Erro ao inserir nicho")
+
+# ==========================================================
+# CMS — LEITURA SEGURA DE NICHOS (PUBLICO VIA API)
+# ==========================================================
+
+@app.get("/public/nichos")
+def listar_nichos_publicos():
+    """
+    Leitura pública segura.
+    Frontend não acessa mais Supabase direto.
+    """
+    try:
+        res = (
+            sb.table("nichos")
+            .select("id,title,slug,description")
+            .order("title")
+            .execute()
+        )
+
+        return {"data": res.data}
+
+    except Exception as e:
+        log("CMS", "ERRO", f"Falha ao listar nichos: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erro ao buscar nichos")
