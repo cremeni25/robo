@@ -923,3 +923,32 @@ try:
 
 except Exception as e:
     print(f"[CORS] [ERRO] Falha ao aplicar CORS: {e}")
+
+# ================================
+# BLOCO OPERACIONAL - DASHBOARD API
+# Inclusão definitiva no FINAL do MAIN
+# ================================
+
+from fastapi.responses import JSONResponse
+
+CAPITAL_FAKE = {
+    "total": 0,
+    "em_risco": 0,
+    "disponivel": 0,
+    "roi": 0
+}
+
+ESCALA_FAKE = {
+    "permitida": False,
+    "risco": "baixo"
+}
+
+
+@app.get("/capital")
+async def get_capital():
+    return JSONResponse(content=CAPITAL_FAKE)
+
+
+@app.get("/escala")
+async def get_escala():
+    return JSONResponse(content=ESCALA_FAKE)
