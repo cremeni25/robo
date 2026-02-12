@@ -952,3 +952,38 @@ async def get_capital():
 @app.get("/escala")
 async def get_escala():
     return JSONResponse(content=ESCALA_FAKE)
+
+# ============================================
+# B2 — CADASTRO OPERACIONAL DE PRODUTOS (MASTER)
+# ============================================
+
+from pydantic import BaseModel
+
+class ProdutoInput(BaseModel):
+    nome: str
+    plataforma: str
+    preco: float
+    comissao: float
+    risco: str = "baixo"
+
+# memória inicial segura (não quebra nada existente)
+if "produtos_cadastrados" not in globals():
+    produtos_cadastrados = []
+
+@app.post("/master/produto")
+async def cadastrar_produto(produto: ProdutoInput):
+    novo = {
+        "id": len(produtos_cadastrados) + 1,
+        "nome": produto.nome,
+        "plataforma": produto.plataforma,
+        "preco": produto.preco,
+        "comissao": produto.comissao,
+        "risco": produto.risco,
+        "status": "ativo"
+    }
+    produtos_cadastrados.append(novo)
+    return {"ok": True, "produto": novo}
+
+@app.get("/master/produtos")
+async def listar_produtos_master():
+    return produtos_cadastrados
