@@ -898,3 +898,28 @@ def listar_nichos_publicos():
     except Exception as e:
         log("PUBLIC", "ERRO", f"Falha ao listar nichos: {str(e)}")
         raise HTTPException(status_code=500, detail="Erro ao buscar nichos")
+
+# ============================================================
+# BLOCO GLOBAL DE LIBERAÇÃO CORS — ROBO GLOBAL AI
+# Inclusão segura ao FINAL do main.py
+# Não altera rotas existentes
+# ============================================================
+
+try:
+    from fastapi.middleware.cors import CORSMiddleware
+
+    # evita duplicação caso já exista em versões futuras
+    if "CORSMiddleware" not in [m.cls.__name__ for m in app.user_middleware]:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+        print("[CORS] [INFO] Middleware global liberado para frontend.")
+    else:
+        print("[CORS] [INFO] Middleware já existente — nenhuma alteração aplicada.")
+
+except Exception as e:
+    print(f"[CORS] [ERRO] Falha ao aplicar CORS: {e}")
