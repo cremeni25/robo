@@ -1060,3 +1060,21 @@ def criar_produto_b2(payload: ProdutoAfiliado, request: Request):
     except Exception as e:
         log("B2", "ERRO", f"Falha ao criar produto: {str(e)}")
         raise HTTPException(status_code=500, detail="Erro ao inserir produto")
+
+# ==========================================================
+# B2.2 — LISTAGEM OPERACIONAL DE PRODUTOS (DASHBOARD)
+# ==========================================================
+
+@app.get("/b2/produtos")
+def listar_produtos_b2():
+
+    try:
+        res = sb.table("produtos").select(
+            "nome, plataforma, preco, comissao, nicho, dor, image_url, gul, status"
+        ).order("created_at", desc=True).execute()
+
+        return res.data or []
+
+    except Exception as e:
+        log("B2", "ERRO", f"Falha ao listar produtos: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erro ao buscar produtos")
