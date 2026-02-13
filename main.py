@@ -987,3 +987,76 @@ async def cadastrar_produto(produto: ProdutoInput):
 @app.get("/master/produtos")
 async def listar_produtos_master():
     return produtos_cadastrados
+
+# ==========================================================
+# B2.1 — PRODUTO AFILIADO ESTRUTURADO (EXECUTOR MASTER)
+# NÃO ALTERA ROTAS EXISTENTES
+# ==========================================================
+
+from typing import Optional
+from pydantic import BaseModel
+
+class ProdutoAfiliado(BaseModel):
+    nome: str
+    plataforma: str
+    product_id: Optional[str] = None
+    affiliate_url: str
+    preco: float
+    comissao: float
+    nicho: Optional[str] = None
+    dor: Optional[str] = None
+    image_url: Optional[str] = None
+
+    # CAMPOS MASTER
+    usuario_master: Optional[str] = None
+    senha_master: Optional[str] = None
+
+    # PREPARAÇÃO GLOBAL (B3)
+    titulo_pt: Optional[str] = None
+    titulo_es: Optional[str] = None
+    titulo_en: Optional[str] = None
+
+
+@app.post("/b2/produtos")
+def criar_produto_b2(payload: ProdutoAfiliado, request: Request):
+
+    validar_master(request)
+
+    try:
+        # ======================================================
+        # GERAÇÃO GUL (GO UNIQUE LINK)
+        # ======================================================
+        import uuid
+        gul = f"/go/{str(uuid.uuid4())[:8]}"
+
+        sb.table("produtos").insert({
+            "nome": payload.nome,
+            "plataforma": payload.plataforma,
+            "product_id": payload.product_id,
+            "affiliate_url": payload.affiliate_url,
+            "preco": payload.preco,
+            "comissao": payload.comissao,
+            "nicho": payload.nicho,
+            "dor": payload.dor,
+            "image_url": payload.image_url,
+            "usuario_master": payload.usuario_master,
+            "senha_master": payload.senha_master,
+            "titulo_pt": payload.titulo_pt,
+            "titulo_es": payload.titulo_es,
+            "titulo_en": payload.titulo_en,
+            "gul": gul,
+            "status": "ativo",
+            "created_at": utc_now_iso()
+        }).execute()
+
+        log("B2", "INFO", f"Produto criado via MASTER: {payload.nome}")
+
+        return {
+            "status": "OK",
+            "produto": payload.nome,
+            "gul": gul
+        }
+
+    except Exception as e:
+        log("B2", "ERRO", f"Falha ao criar produto: {str(e)}")
+        raise HTTPException(status_code=500, detail="Erro ao inserir produto")
