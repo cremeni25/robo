@@ -1078,3 +1078,78 @@ def listar_produtos_b2():
     except Exception as e:
         log("B2", "ERRO", f"Falha ao listar produtos: {str(e)}")
         raise HTTPException(status_code=500, detail="Erro ao buscar produtos")
+
+# ==========================================================
+# B2.5 — GUL (GLOBAL UNIQUE LINK) ENGINE
+# Geração automática de link blindado do Robô Global
+# NÃO altera pipeline existente
+# ==========================================================
+
+import hashlib
+from datetime import datetime
+
+BASE_REDIRECT = os.getenv("BASE_REDIRECT", "https://roboglobal.com.br/go")
+
+def gerar_gul(plataforma: str, codigo: str, link_afiliado: str) -> str:
+    """
+    Cria o GUL (Global Unique Link)
+    Blindagem da comissão do Robô Global.
+    """
+    raw = f"{plataforma}:{codigo}:{link_afiliado}:{datetime.utcnow().isoformat()}"
+    hash_id = hashlib.sha256(raw.encode()).hexdigest()[:12]
+    return f"{BASE_REDIRECT}/{hash_id}"
+
+
+# ==========================================================
+# ENDPOINT MASTER — REGISTRO COM GUL AUTOMÁTICO
+# ==========================================================
+
+class ProdutoMaster(BaseModel):
+    nome: str
+    plataforma: str
+    preco: float
+    comissao: str
+    link_afiliado: str
+    url_produto: Optional[str] = None
+    imagem: Optional[str] = None
+    nicho: Optional[str] = None
+    dor: Optional[str] = None
+    codigo: Optional[str] = None
+
+
+@app.post("/master/produto")
+def master_cadastrar_produto(payload: ProdutoMaster):
+
+    try:
+        gul = gerar_gul(
+            payload.plataforma,
+            payload.codigo or payload.nome,
+            payload.link_afiliado,
+        )
+
+        sb.table("produtos").insert({
+            "nome": payload.nome,
+            "plataforma": payload.plataforma,
+            "preco": payload.preco,
+            "comissao": payload.comissao,
+            "link_afiliado": payload.link_afiliado,
+            "url_produto": payload.url_produto,
+            "imagem": payload.imagem,
+            "nicho": payload.nicho,
+            "dor": payload.dor,
+            "codigo": payload.codigo,
+            "gul": gul,
+            "created_at": utc_now_iso()
+        }).execute()
+
+        log("B2.5", "INFO", f"GUL gerado: {gul}")
+
+        return {
+            "status": "OK",
+            "mensagem": "Produto cadastrado com GUL",
+            "gul": gul
+        }
+
+    except Exception as e:
+        log("B2.5", "ERRO", str(e))
+        raise HTTPException(status_code=500, detail="Erro ao cadastrar produto")
