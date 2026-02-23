@@ -1906,3 +1906,46 @@ async def registrar_memoria_robo(dor_id: str, solucao: dict):
 
     except Exception as e:
         print("Erro ao registrar memória:", e)
+
+# =========================================================
+# FASE 11 — PAINEL MASTER DO ROBÔ GLOBAL
+# =========================================================
+
+@app.get("/master/decisoes")
+async def listar_decisoes():
+    try:
+        res = supabase.table("decisoes_estrategicas") \
+            .select("*") \
+            .order("id", desc=True) \
+            .limit(200) \
+            .execute()
+        return res.data
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/master/acoes")
+async def listar_acoes():
+    try:
+        res = supabase.table("acoes_executadas") \
+            .select("*") \
+            .order("id", desc=True) \
+            .limit(200) \
+            .execute()
+        return res.data
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/master/resumo")
+async def resumo_master():
+    try:
+        decisoes = supabase.table("decisoes_estrategicas").select("id").execute()
+        acoes = supabase.table("acoes_executadas").select("id").execute()
+
+        return {
+            "total_decisoes": len(decisoes.data),
+            "total_acoes": len(acoes.data)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
