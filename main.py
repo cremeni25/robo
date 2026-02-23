@@ -1610,13 +1610,10 @@ async def listar_acoes_real():
     except Exception as e:
         return {"erro": str(e)}
 
-===============================
-
-FIX DEFINITIVO — SCHEMA ROBO_GLOBAL
-
-Sobrescreve endpoints quebrados
-
-===============================
+# ============================================
+# FIX DEFINITIVO - SCHEMA ROBO_GLOBAL
+# Sobrescreve endpoints quebrados
+# ============================================
 
 @app.get("/estrategia/decisoes-real")
 async def decisoes_reais():
