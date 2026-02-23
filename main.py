@@ -1610,35 +1610,37 @@ async def listar_acoes_real():
     except Exception as e:
         return {"erro": str(e)}
 
-# ============================================
-# FIX DEFINITIVO - SCHEMA ROBO_GLOBAL
-# Sobrescreve endpoints quebrados
-# ============================================
+# ==========================================================
+# ENDPOINTS REAIS — SCHEMA ROBO_GLOBAL (VERSÃO ESTÁVEL)
+# ==========================================================
 
 @app.get("/estrategia/decisoes-real")
 async def decisoes_reais():
-try:
-resp = supabase.table("robo_global.decisoes_estrategicas") 
-.select("*") 
-.order("created_at", desc=True) 
-.limit(100) 
-.execute()
+    try:
+        resp = (
+            supabase.schema("robo_global")
+            .table("decisoes_estrategicas")
+            .select("*")
+            .order("data_decisao", desc=True)
+            .limit(100)
+            .execute()
+        )
+        return resp.data
+    except Exception as e:
+        return {"erro": str(e)}
 
-    return resp.data
-
-except Exception as e:
-    return {"erro": str(e)}
 
 @app.get("/estrategia/acoes-real")
 async def acoes_reais():
-try:
-resp = supabase.table("robo_global.acoes_executadas") 
-.select("*") 
-.order("created_at", desc=True) 
-.limit(100) 
-.execute()
-
-    return resp.data
-
-except Exception as e:
-    return {"erro": str(e)}
+    try:
+        resp = (
+            supabase.schema("robo_global")
+            .table("acoes_executadas")
+            .select("*")
+            .order("data_execucao", desc=True)
+            .limit(100)
+            .execute()
+        )
+        return resp.data
+    except Exception as e:
+        return {"erro": str(e)}
