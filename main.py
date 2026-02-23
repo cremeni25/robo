@@ -1223,3 +1223,28 @@ def listar_nichos_publicos():
         return resp.data or []
     except Exception as e:
         return {"detail": "Erro ao buscar nichos", "erro": str(e)}
+
+# ================================
+# 🔹 ENDPOINT SEGURO — NICHOS PUBLICOS
+# NÃO ALTERA NADA EXISTENTE
+# ================================
+
+@app.get("/public2/nichos")
+def listar_nichos_publicos_seguro():
+    try:
+        result = (
+            supabase
+            .schema("robo_global")
+            .table("nichos")
+            .select("*")
+            .execute()
+        )
+
+        return result.data or []
+
+    except Exception as e:
+        print("[NICHOS] ERRO:", str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao buscar nichos: {str(e)}"
+        )
