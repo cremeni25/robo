@@ -1715,3 +1715,36 @@ def listar_acoes_humanas():
         return resp.data or []
     except Exception as e:
         return {"erro": str(e)}
+
+# =========================================================
+# FASE 9 — IDENTIDADE E PERFIL DO USUÁRIO (SUPABASE AUTH)
+# =========================================================
+
+from fastapi import Header, HTTPException
+
+async def obter_usuario_logado(authorization: str = Header(None)):
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Token não informado")
+
+    try:
+        token = authorization.replace("Bearer ", "")
+
+        user = supabase.auth.get_user(token)
+        if not user or not user.user:
+            raise HTTPException(status_code=401, detail="Token inválido")
+
+        auth_id = user.user.id
+
+        perfil = supabase.table("v_perfil_usuario") \
+            .select("*") \
+            .eq("auth_user_id", auth_id) \
+            .single() \
+            .execute()
+
+        if not perfil.data:
+            raise HTTPException(status_code=403, detail="Usuário não registrado")
+
+        return perfil.data
+
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=str(e))
