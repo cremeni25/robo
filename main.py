@@ -1268,3 +1268,104 @@ try:
 
 except Exception as e:
     print(f"[SUPABASE] Erro ao inicializar cliente: {e}")
+
+# ==========================================================
+# 🧠 MOTOR ESTRATÉGICO DO ROBÔ GLOBAL — FASE 1 FINAL
+# ==========================================================
+
+from collections import defaultdict
+
+def calcular_metricas_produtos():
+    """
+    Calcula métricas reais por produto baseado nos eventos financeiros.
+    """
+    eventos = supabase.schema("robo_global").table("eventos_financeiros").select("*").execute().data
+    
+    if not eventos:
+        return {}
+
+    metricas = defaultdict(lambda: {
+        "vendas": 0,
+        "receita": 0.0,
+        "comissoes": 0.0,
+        "reembolsos": 0
+    })
+
+    for e in eventos:
+        produto = e.get("produto_id")
+        if not produto:
+            continue
+
+        metricas[produto]["vendas"] += 1
+        metricas[produto]["receita"] += float(e.get("valor", 0))
+        metricas[produto]["comissoes"] += float(e.get("comissao", 0))
+        
+        if e.get("status") == "reembolsado":
+            metricas[produto]["reembolsos"] += 1
+
+    return metricas
+
+
+def pontuar_produto(dados):
+    """
+    Calcula score equilibrado: lucro + conversão + risco.
+    """
+    vendas = dados["vendas"]
+    receita = dados["receita"]
+    comissoes = dados["comissoes"]
+    reembolsos = dados["reembolsos"]
+
+    if vendas == 0:
+        return 0
+
+    ticket = receita / vendas
+    margem = comissoes / receita if receita else 0
+    risco = reembolsos / vendas
+
+    score = (
+        (margem * 50) +
+        (ticket * 0.1) +
+        (vendas * 2) -
+        (risco * 40)
+    )
+
+    return round(score, 2)
+
+
+def classificar_ofertas():
+    """
+    Retorna ranking estratégico de produtos.
+    """
+    metricas = calcular_metricas_produtos()
+    
+    ranking = []
+
+    for produto, dados in metricas.items():
+        score = pontuar_produto(dados)
+        ranking.append({
+            "produto_id": produto,
+            "score": score,
+            **dados
+        })
+
+    ranking.sort(key=lambda x: x["score"], reverse=True)
+    return ranking
+
+
+def escolher_ofertas_prioritarias(top=5):
+    """
+    Seleciona as melhores ofertas para escalar.
+    """
+    ranking = classificar_ofertas()
+    return ranking[:top]
+
+
+@app.get("/estrategia/ofertas")
+def api_ranking_ofertas():
+    """
+    Endpoint de visualização da inteligência do robô.
+    """
+    try:
+        return escolher_ofertas_prioritarias()
+    except Exception as e:
+        return {"erro": str(e)}
