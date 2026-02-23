@@ -1609,3 +1609,39 @@ async def listar_acoes_real():
 
     except Exception as e:
         return {"erro": str(e)}
+
+===============================
+
+FIX DEFINITIVO — SCHEMA ROBO_GLOBAL
+
+Sobrescreve endpoints quebrados
+
+===============================
+
+@app.get("/estrategia/decisoes-real")
+async def decisoes_reais():
+try:
+resp = supabase.table("robo_global.decisoes_estrategicas") 
+.select("*") 
+.order("created_at", desc=True) 
+.limit(100) 
+.execute()
+
+    return resp.data
+
+except Exception as e:
+    return {"erro": str(e)}
+
+@app.get("/estrategia/acoes-real")
+async def acoes_reais():
+try:
+resp = supabase.table("robo_global.acoes_executadas") 
+.select("*") 
+.order("created_at", desc=True) 
+.limit(100) 
+.execute()
+
+    return resp.data
+
+except Exception as e:
+    return {"erro": str(e)}
