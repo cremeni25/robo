@@ -1576,3 +1576,36 @@ async def listar_acoes():
 
     except Exception as e:
         return {"erro": str(e)}
+
+# ============================================
+# ENDPOINTS NOVOS — LISTAGEM REAL DO ROBÔ
+# ============================================
+
+@app.get("/estrategia/decisoes-real")
+async def listar_decisoes_real():
+    try:
+        resp = supabase.table("decisoes_estrategicas")\
+            .select("*")\
+            .order("data_decisao", desc=True)\
+            .limit(50)\
+            .execute()
+
+        return resp.data
+
+    except Exception as e:
+        return {"erro": str(e)}
+
+
+@app.get("/estrategia/acoes-real")
+async def listar_acoes_real():
+    try:
+        resp = supabase.table("acoes_executadas")\
+            .select("*")\
+            .order("data_execucao", desc=True)\
+            .limit(50)\
+            .execute()
+
+        return resp.data
+
+    except Exception as e:
+        return {"erro": str(e)}
