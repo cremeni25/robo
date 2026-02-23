@@ -1826,8 +1826,13 @@ async def recomendar_solucao(dor_id: str):
         if not res.data:
             raise HTTPException(status_code=404, detail="Nenhuma solução encontrada")
 
+        # Obter solução escolhida
         solucao = res.data[0]["solucoes"]
 
+        # Registrar memória do robô
+        await registrar_memoria_robo(dor_id, solucao)
+
+        # Retornar recomendação
         return {
             "solucao_id": solucao["id"],
             "nome": solucao["nome"],
