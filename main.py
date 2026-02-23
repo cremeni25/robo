@@ -1949,3 +1949,31 @@ async def resumo_master():
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+# =========================================================
+# FASE 11 — CADASTRO OPERACIONAL (PRESTADOR)
+# =========================================================
+
+@app.post("/operacional/plataforma")
+async def criar_plataforma(payload: dict):
+    try:
+        res = supabase.table("plataformas").insert(payload).execute()
+        return res.data
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/operacional/solucao")
+async def criar_solucao(payload: dict):
+    try:
+        res = supabase.table("solucoes").insert(payload).execute()
+        return res.data
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/operacional/vincular")
+async def vincular_solucao(payload: dict):
+    try:
+        res = supabase.table("dor_solucoes").insert(payload).execute()
+        return res.data
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
