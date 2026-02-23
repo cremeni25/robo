@@ -1678,3 +1678,40 @@ async def listar_acoes_reais():
 
     except Exception as e:
         return {"erro": str(e)}
+
+# ============================================================
+# FASE 7 — ENDPOINTS HUMANOS DEFINITIVOS (VERSÃO FINAL)
+# ============================================================
+
+@app.get("/estrategia/decisoes-real")
+def listar_decisoes_humanas():
+    try:
+        resp = (
+            supabase
+            .schema("robo_global")
+            .table("decisoes_estrategicas")
+            .select("*")
+            .order("created_at", desc=True)
+            .limit(100)
+            .execute()
+        )
+        return resp.data or []
+    except Exception as e:
+        return {"erro": str(e)}
+
+
+@app.get("/estrategia/acoes-real")
+def listar_acoes_humanas():
+    try:
+        resp = (
+            supabase
+            .schema("robo_global")
+            .table("acoes_executadas")
+            .select("*")
+            .order("created_at", desc=True)
+            .limit(100)
+            .execute()
+        )
+        return resp.data or []
+    except Exception as e:
+        return {"erro": str(e)}
