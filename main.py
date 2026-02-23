@@ -1836,3 +1836,26 @@ async def recomendar_solucao(dor_id: str):
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+# =========================================================
+# FASE 10 — REGISTRO AUTOMÁTICO DE DECISÕES
+# =========================================================
+
+async def registrar_memoria_robo(dor_id: str, solucao: dict):
+    try:
+        # Registrar decisão estratégica
+        supabase.table("decisoes_estrategicas").insert({
+            "produto_id": solucao["id"],
+            "score": 0,
+            "decisao": f"Solução escolhida para dor {dor_id}"
+        }).execute()
+
+        # Registrar ação executada
+        supabase.table("acoes_executadas").insert({
+            "produto_id": solucao["id"],
+            "acao": "Recomendação automática",
+            "status": "EXECUTADA"
+        }).execute()
+
+    except Exception as e:
+        print("Erro ao registrar memória:", e)
