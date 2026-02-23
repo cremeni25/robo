@@ -1196,3 +1196,30 @@ def redirect_gul(gul_id: str):
     except Exception as e:
         log("B2.6", "ERRO", str(e))
         raise HTTPException(status_code=500, detail="Erro no redirecionamento")
+
+# ===============================
+# SCHEMA FIX — ROBO GLOBAL
+# NÃO ALTERAR NADA ACIMA
+# ===============================
+
+SCHEMA_ROBO = "robo_global"
+
+def table_rg(nome_tabela: str):
+    """
+    Helper seguro para acessar tabelas do schema robo_global
+    Sem impactar código existente
+    """
+    return supabase.schema(SCHEMA_ROBO).table(nome_tabela)
+
+# ===============================
+# ENDPOINT PUBLICO — NICHOS
+# CORRIGIDO PARA SCHEMA
+# ===============================
+
+@app.get("/public/nichos")
+def listar_nichos_publicos():
+    try:
+        resp = table_rg("nichos").select("*").execute()
+        return resp.data or []
+    except Exception as e:
+        return {"detail": "Erro ao buscar nichos", "erro": str(e)}
