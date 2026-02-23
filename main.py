@@ -1644,3 +1644,37 @@ async def acoes_reais():
         return resp.data
     except Exception as e:
         return {"erro": str(e)}
+
+# ===============================
+# FASE 7 — FIX DEFINITIVO ENDPOINTS HUMANOS
+# NÃO ALTERAR NADA ACIMA
+# ===============================
+
+@app.get("/estrategia/decisoes-real")
+async def listar_decisoes_reais():
+    try:
+        res = supabase.table("decisoes_robo") \
+            .select("*") \
+            .order("created_at", desc=True) \
+            .limit(50) \
+            .execute()
+
+        return res.data or []
+
+    except Exception as e:
+        return {"erro": str(e)}
+
+
+@app.get("/estrategia/acoes-real")
+async def listar_acoes_reais():
+    try:
+        res = supabase.table("tarefas_executadas") \
+            .select("*") \
+            .order("created_at", desc=True) \
+            .limit(50) \
+            .execute()
+
+        return res.data or []
+
+    except Exception as e:
+        return {"erro": str(e)}
