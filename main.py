@@ -1359,7 +1359,40 @@ def escolher_ofertas_prioritarias(top=5):
     ranking = classificar_ofertas()
     return ranking[:top]
 
+# ==============================
+# BLOCO NOVO — Estratégia Real
+# NÃO ALTERAR NADA ACIMA
+# ==============================
 
+@app.get("/estrategia/ofertas-real")
+def obter_ofertas_reais():
+    try:
+        response = (
+            supabase
+            .schema("robo_global")
+            .table("v_produto_metricas")
+            .select("*")
+            .execute()
+        )
+
+        dados = response.data or []
+
+        resultado = []
+
+        for row in dados:
+            resultado.append({
+                "produto_id": row["produto_id"],
+                "score": row["score"],
+                "vendas": row["vendas"],
+                "receita": row["comissoes"],
+                "comissoes": row["comissoes"],
+                "reembolsos": row["reembolsos"],
+            })
+
+        return resultado
+
+    except Exception as e:
+        return {"erro": str(e)}
 @app.get("/estrategia/ofertas")
 def api_ranking_ofertas():
     """
