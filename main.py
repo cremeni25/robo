@@ -1748,3 +1748,30 @@ async def obter_usuario_logado(authorization: str = Header(None)):
 
     except Exception as e:
         raise HTTPException(status_code=401, detail=str(e))
+
+# =========================================================
+# FASE 9 — CONTROLE DE ACESSO E PERMISSÕES
+# =========================================================
+
+from fastapi import Depends
+
+async def exigir_login(usuario = Depends(obter_usuario_logado)):
+    return usuario
+
+
+async def exigir_master(usuario = Depends(obter_usuario_logado)):
+    if usuario["perfil"] != "MASTER":
+        raise HTTPException(status_code=403, detail="Acesso restrito ao MASTER")
+    return usuario
+
+
+async def exigir_permissao_admin(usuario = Depends(obter_usuario_logado)):
+    if not usuario.get("pode_admin"):
+        raise HTTPException(status_code=403, detail="Permissão administrativa necessária")
+    return usuario
+
+
+async def exigir_permissao_cadastro(usuario = Depends(obter_usuario_logado)):
+    if not usuario.get("pode_cadastrar"):
+        raise HTTPException(status_code=403, detail="Permissão de cadastro necessária")
+    return usuario
