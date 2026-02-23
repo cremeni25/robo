@@ -1402,3 +1402,144 @@ def api_ranking_ofertas():
         return escolher_ofertas_prioritarias()
     except Exception as e:
         return {"erro": str(e)}
+
+# ============================================================
+# MÓDULO DE DECISÃO E ESCALADA AUTOMÁTICA — ROBO GLOBAL AI
+# ============================================================
+
+from datetime import datetime
+
+# ------------------------------------------------------------
+# REGRAS DE DECISÃO (padrão inicial — ajustável depois)
+# ------------------------------------------------------------
+
+def decidir_acao_produto(score: float, vendas: int, receita: float):
+    """
+    Motor simples de decisão estratégica.
+    Pode evoluir para IA depois.
+    """
+
+    if vendas == 0:
+        return "IGNORAR", "Sem vendas registradas"
+
+    if score >= 3:
+        return "ESCALAR", "Produto com alto desempenho"
+
+    if score >= 1:
+        return "TESTAR", "Produto com desempenho médio"
+
+    return "PAUSAR", "Produto com baixo desempenho"
+
+
+# ------------------------------------------------------------
+# REGISTRO DE DECISÕES NO BANCO
+# ------------------------------------------------------------
+
+def registrar_decisao_estrategica(produto_id, decisao, motivo):
+    try:
+        supabase.table("decisoes_estrategicas").insert({
+            "entidade": "produto",
+            "entidade_id": produto_id,
+            "decisao": decisao,
+            "base_decisao": motivo,
+            "status": "ATIVA",
+            "data_decisao": datetime.utcnow().isoformat()
+        }).execute()
+
+        print(f"[DECISAO] INFO Produto {produto_id} -> {decisao}")
+
+    except Exception as e:
+        print(f"[DECISAO] ERRO ao registrar decisão: {e}")
+
+
+# ------------------------------------------------------------
+# EXECUÇÃO DE AÇÕES AUTOMÁTICAS
+# ------------------------------------------------------------
+
+def registrar_acao(produto_id, decisao):
+    try:
+        supabase.table("acoes_executadas").insert({
+            "decisao_id": None,
+            "tipo_acao": decisao,
+            "descricao_acao": f"Ação automática: {decisao}",
+            "resultado": "PENDENTE",
+            "data_execucao": datetime.utcnow().isoformat()
+        }).execute()
+
+        print(f"[ACAO] INFO Ação registrada: {decisao}")
+
+    except Exception as e:
+        print(f"[ACAO] ERRO ao registrar ação: {e}")
+
+
+# ------------------------------------------------------------
+# GERENCIADOR PRINCIPAL DE ESCALADA
+# ------------------------------------------------------------
+
+def gerenciar_escalada():
+    """
+    Função central do cérebro do robô.
+    Analisa todos os produtos e decide automaticamente.
+    """
+
+    print("[ESCALADA] INFO Iniciando análise estratégica...")
+
+    try:
+        resp = supabase.table("v_produto_metricas").select("*").execute()
+        produtos = resp.data or []
+
+        for p in produtos:
+            produto_id = p["produto_id"]
+            score = float(p["score"] or 0)
+            vendas = int(p["vendas"] or 0)
+            receita = float(p["comissoes"] or 0)
+
+            decisao, motivo = decidir_acao_produto(score, vendas, receita)
+
+            registrar_decisao_estrategica(produto_id, decisao, motivo)
+            registrar_acao(produto_id, decisao)
+
+        print("[ESCALADA] INFO Análise concluída")
+
+    except Exception as e:
+        print(f"[ESCALADA] ERRO {e}")
+
+
+# ------------------------------------------------------------
+# ENDPOINT DE EXECUÇÃO MANUAL
+# ------------------------------------------------------------
+
+@app.get("/estrategia/executar")
+def executar_estrategia():
+    gerenciar_escalada()
+    return {"status": "estrategia executada"}
+
+
+# ------------------------------------------------------------
+# ENDPOINT DE VISUALIZAÇÃO DAS DECISÕES
+# ------------------------------------------------------------
+
+@app.get("/estrategia/decisoes")
+def listar_decisoes():
+    resp = supabase.table("decisoes_estrategicas") \
+        .select("*") \
+        .order("data_decisao", desc=True) \
+        .limit(50) \
+        .execute()
+
+    return resp.data
+
+
+# ------------------------------------------------------------
+# ENDPOINT DE AÇÕES EXECUTADAS
+# ------------------------------------------------------------
+
+@app.get("/estrategia/acoes")
+def listar_acoes():
+    resp = supabase.table("acoes_executadas") \
+        .select("*") \
+        .order("data_execucao", desc=True) \
+        .limit(50) \
+        .execute()
+
+    return resp.data
