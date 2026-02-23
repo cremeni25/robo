@@ -1248,3 +1248,23 @@ def listar_nichos_publicos_seguro():
             status_code=500,
             detail=f"Erro ao buscar nichos: {str(e)}"
         )
+
+# ============================================================
+# 🔹 Inicialização segura do cliente Supabase (escopo global)
+# ============================================================
+
+try:
+    from supabase import create_client
+    import os
+
+    SUPABASE_URL = os.getenv("SUPABASE_URL")
+    SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+    if SUPABASE_URL and SUPABASE_KEY:
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        print("[SUPABASE] Cliente inicializado com sucesso")
+    else:
+        print("[SUPABASE] Variáveis de ambiente não definidas")
+
+except Exception as e:
+    print(f"[SUPABASE] Erro ao inicializar cliente: {e}")
