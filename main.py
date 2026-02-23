@@ -1810,12 +1810,17 @@ async def cadastrar_solucao(
         raise HTTPException(status_code=400, detail=str(e))
 
 # =========================================================
-# FASE 10 — MOTOR DE RECOMENDAÇÃO REAL DO ROBÔ
+# FASE 10 — MOTOR REAL DO ROBÔ GLOBAL (VERSÃO DEFINITIVA)
 # =========================================================
+
+import uuid
+from fastapi.responses import RedirectResponse
+
 
 @app.get("/recomendar/{dor_id}")
 async def recomendar_solucao(dor_id: str):
     try:
+        # Buscar melhor solução
         res = supabase.table("dor_solucoes") \
             .select("*, solucoes(*)") \
             .eq("dor_id", dor_id) \
@@ -1826,18 +1831,55 @@ async def recomendar_solucao(dor_id: str):
         if not res.data:
             raise HTTPException(status_code=404, detail="Nenhuma solução encontrada")
 
-        # Obter solução escolhida
         solucao = res.data[0]["solucoes"]
+
+        # Gerar ID de rastreamento
+        go_id = str(uuid.uuid4())
 
         # Registrar memória do robô
         await registrar_memoria_robo(dor_id, solucao)
 
-        # Retornar recomendação
-        return {
+        # Registrar clique para rastreamento
+        supabase.table("go_tracking").insert({
+            "id": go_id,
+            "dor_id": dor_id,
             "solucao_id": solucao["id"],
-            "nome": solucao["nome"],
-            "link": solucao["link_afiliado"]
+            "link_destino": solucao["link_afiliado"]
+        }).execute()
+
+        # Retornar somente ID público
+        return {
+            "go_id": go_id
         }
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# =========================================================
+# ENDPOINT DE REDIRECIONAMENTO REAL
+# =========================================================
+
+@app.get("/go/{go_id}")
+async def redirecionar(go_id: str):
+    try:
+        res = supabase.table("go_tracking") \
+            .select("*") \
+            .eq("id", go_id) \
+            .single() \
+            .execute()
+
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Link inválido")
+
+        destino = res.data["link_destino"]
+
+        # Registrar clique executado
+        supabase.table("go_tracking").update({
+            "clicado": True
+        }).eq("id", go_id).execute()
+
+        return RedirectResponse(destino)
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
