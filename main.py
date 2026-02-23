@@ -1543,3 +1543,36 @@ def listar_acoes():
         .execute()
 
     return resp.data
+
+# ============================================
+# ENDPOINTS CORRIGIDOS — DECISÕES E AÇÕES
+# ============================================
+
+@app.get("/estrategia/decisoes")
+async def listar_decisoes():
+    try:
+        resp = supabase.table("decisoes_estrategicas")\
+            .select("*")\
+            .order("data_decisao", desc=True)\
+            .limit(50)\
+            .execute()
+
+        return resp.data
+
+    except Exception as e:
+        return {"erro": str(e)}
+
+
+@app.get("/estrategia/acoes")
+async def listar_acoes():
+    try:
+        resp = supabase.table("acoes_executadas")\
+            .select("*")\
+            .order("data_execucao", desc=True)\
+            .limit(50)\
+            .execute()
+
+        return resp.data
+
+    except Exception as e:
+        return {"erro": str(e)}
