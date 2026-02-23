@@ -1808,3 +1808,31 @@ async def cadastrar_solucao(
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+# =========================================================
+# FASE 10 — MOTOR DE RECOMENDAÇÃO REAL DO ROBÔ
+# =========================================================
+
+@app.get("/recomendar/{dor_id}")
+async def recomendar_solucao(dor_id: str):
+    try:
+        res = supabase.table("dor_solucoes") \
+            .select("*, solucoes(*)") \
+            .eq("dor_id", dor_id) \
+            .order("prioridade", desc=True) \
+            .limit(1) \
+            .execute()
+
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Nenhuma solução encontrada")
+
+        solucao = res.data[0]["solucoes"]
+
+        return {
+            "solucao_id": solucao["id"],
+            "nome": solucao["nome"],
+            "link": solucao["link_afiliado"]
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
