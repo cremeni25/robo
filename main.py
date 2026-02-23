@@ -1775,3 +1775,36 @@ async def exigir_permissao_cadastro(usuario = Depends(obter_usuario_logado)):
     if not usuario.get("pode_cadastrar"):
         raise HTTPException(status_code=403, detail="Permissão de cadastro necessária")
     return usuario
+
+# =========================================================
+# FASE 10 — CADASTRO OPERACIONAL DE SOLUÇÕES
+# =========================================================
+
+from pydantic import BaseModel
+
+class NovaSolucao(BaseModel):
+    nome: str
+    plataforma_id: str
+    link_afiliado: str
+    comissao_percentual: float | None = None
+    ticket_medio: float | None = None
+
+
+@app.post("/solucoes")
+async def cadastrar_solucao(
+    dados: NovaSolucao,
+    usuario = Depends(exigir_permissao_cadastro)
+):
+    try:
+        res = supabase.table("solucoes").insert({
+            "nome": dados.nome,
+            "plataforma_id": dados.plataforma_id,
+            "link_afiliado": dados.link_afiliado,
+            "comissao_percentual": dados.comissao_percentual,
+            "ticket_medio": dados.ticket_medio
+        }).execute()
+
+        return {"status": "solução cadastrada", "data": res.data}
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
