@@ -1977,3 +1977,16 @@ async def vincular_solucao(payload: dict):
         return res.data
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/public2/dores/{nicho_id}")
+async def listar_dores_publicas(nicho_id: str):
+    try:
+        res = supabase.table("dores") \
+            .select("id, descricao") \
+            .eq("nicho_id", nicho_id) \
+            .execute()
+
+        return res.data
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Erro ao buscar dores")
