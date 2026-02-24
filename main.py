@@ -1990,3 +1990,19 @@ async def listar_dores_publicas(nicho_id: str):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail="Erro ao buscar dores")
+
+# ============================================
+# NICHOS PUBLICOS OFICIAIS (BASE RELACIONAL)
+# ============================================
+
+@app.get("/public/nichos-oficial")
+async def listar_nichos_oficiais():
+    try:
+        res = supabase.table("nichos") \
+            .select("id, nome") \
+            .execute()
+
+        return res.data
+
+    except Exception:
+        raise HTTPException(status_code=500, detail="Erro ao buscar nichos oficiais")
