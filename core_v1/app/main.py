@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import secrets
 from decimal import Decimal
 from typing import Any, Literal
@@ -14,6 +15,9 @@ from pydantic import BaseModel, Field, HttpUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from psycopg import connect
 from psycopg.rows import dict_row
+
+
+logger = logging.getLogger("robo-global-core")
 
 
 class Settings(BaseSettings):
@@ -90,6 +94,30 @@ def tracked_url(affiliate_url: str, strategy: str, template: str | None, attribu
         raise HTTPException(status_code=503, detail="platform tracking adapter not configured")
 
     raise HTTPException(status_code=500, detail="unknown tracking strategy")
+
+
+@app.on_event("startup")
+def startup_database_probe() -> None:
+    try:
+        with db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "select count(*) as tables from information_schema.tables where table_schema = %s",
+                    (settings.core_schema,),
+                )
+                row = cur.fetchone()
+        logger.info("CORE_DB_READY schema=%s tables=%s", settings.core_schema, row["tables"])
+    except Exception as exc:
+        message = str(exc).lower()
+        if "password authentication failed" in message or "authentication failed" in message:
+            category = "authentication_failed"
+        elif "could not translate host" in message or "name or service not known" in message:
+            category = "dns_failed"
+        elif "connection refused" in message or "timeout" in message:
+            category = "connection_failed"
+        else:
+            category = exc.__class__.__name__
+        logger.error("CORE_DB_NOT_READY category=%s", category)
 
 
 class DemandCreate(BaseModel):
