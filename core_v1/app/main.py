@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     database_url: str
     core_ingest_key: str
     environment: str = "development"
-    core_schema: str = "robo_global_core"
+    core_schema: Literal["robo_global_core"] = "robo_global_core"
 
 
 settings = Settings()
@@ -395,7 +395,7 @@ def ingest_affiliate_event(payload: AffiliateEventIn) -> dict[str, Any]:
         insert into {settings.core_schema}.affiliate_events_raw
         (platform, external_event_id, event_type, payload, payload_hash)
         values (%s,%s,%s,%s::jsonb,%s)
-        on conflict (payload_hash) do nothing
+        on conflict do nothing
         returning id
     """
     with db_connection() as conn:
