@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 import logging
 import secrets
@@ -11,7 +12,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field, HttpUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from psycopg import connect
@@ -33,7 +34,7 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-app = FastAPI(title="Robo Global Core API", version="1.0.0-alpha.3")
+app = FastAPI(title="Robo Global Core API", version="1.0.0-alpha.4")
 
 
 def db_connection():
@@ -120,6 +121,29 @@ def economic_effect(status: str, commission_value: Decimal) -> tuple[str, Decima
     if status == "chargeback":
         return "chargeback", -amount
     return None
+
+
+def esc(value: Any) -> str:
+    if value is None:
+        return "—"
+    return html.escape(str(value))
+
+
+def money(value: Any, currency: str = "BRL") -> str:
+    try:
+        number = Decimal(str(value or 0))
+    except Exception:
+        number = Decimal("0")
+    formatted = f"{number:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    symbol = "R$" if currency == "BRL" else currency
+    return f"{symbol} {formatted}"
+
+
+def masked_transaction(value: Any) -> str:
+    text = str(value or "")
+    if len(text) <= 8:
+        return esc(text or "—")
+    return esc(f"{text[:4]}…{text[-4:]}")
 
 
 @app.on_event("startup")
@@ -210,6 +234,102 @@ def health_db():
             cur.execute("select count(*) as tables from information_schema.tables where table_schema=%s", (settings.core_schema,))
             row = cur.fetchone()
     return {"status": "ok", "schema": settings.core_schema, "tables": row["tables"]}
+
+
+@app.get("/control", response_class=HTMLResponse)
+def control_panel():
+    test_sql = """(
+        coalesce(r.payload->'data'->'product'->>'id','') = '0'
+        or lower(coalesce(r.payload->'data'->'product'->>'name','')) like '%test%'
+        or lower(coalesce(r.payload->'data'->'buyer'->>'email','')) like '%@example.com'
+    )"""
+    with db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("select count(*) as n from information_schema.tables where table_schema=%s", (settings.core_schema,))
+            table_count = cur.fetchone()["n"]
+            cur.execute(f"select count(*) n, count(*) filter (where status='active') active from {settings.core_schema}.offers")
+            offers = cur.fetchone()
+            cur.execute(f"select count(*) n, count(*) filter (where status in ('testing','winner')) active from {settings.core_schema}.opportunities")
+            opportunities = cur.fetchone()
+            cur.execute(f"select count(*) n from {settings.core_schema}.interactions where event_type='redirect'")
+            redirects = cur.fetchone()["n"]
+            cur.execute(f"""select
+                count(*) filter (where not {test_sql}) as commercial,
+                count(*) filter (where {test_sql}) as tests
+                from {settings.core_schema}.conversions c
+                left join {settings.core_schema}.affiliate_events_raw r on r.id=c.raw_event_id""")
+            conversions = cur.fetchone()
+            cur.execute(f"""select coalesce(sum(e.amount) filter (where not {test_sql}),0) as net
+                from {settings.core_schema}.economic_outcomes e
+                left join {settings.core_schema}.affiliate_events_raw r on r.id=e.raw_event_id""")
+            net_commission = cur.fetchone()["net"]
+            cur.execute(f"""select o.name,o.platform,o.status,o.market,o.language,o.currency,o.price,o.commission_value,o.tracking_strategy
+                from {settings.core_schema}.offers o order by o.updated_at desc limit 8""")
+            offer_rows = cur.fetchall()
+            cur.execute(f"""select op.angle,op.market,op.language,op.score,op.status,ofr.name offer_name
+                from {settings.core_schema}.opportunities op
+                join {settings.core_schema}.offers ofr on ofr.id=op.offer_id
+                order by op.updated_at desc limit 8""")
+            opportunity_rows = cur.fetchall()
+            cur.execute(f"""select r.event_type,r.processing_status,r.received_at,
+                r.payload->'data'->'product'->>'name' product_name,
+                r.payload->'data'->'purchase'->>'transaction' transaction,
+                case when {test_sql} then true else false end as is_test
+                from {settings.core_schema}.affiliate_events_raw r
+                where r.platform='HOTMART' order by r.received_at desc limit 10""")
+            event_rows = cur.fetchall()
+            cur.execute(f"""select c.external_sale_id,c.status,c.gross_value,c.commission_value,c.currency,c.occurred_at,
+                case when {test_sql} then true else false end as is_test
+                from {settings.core_schema}.conversions c
+                left join {settings.core_schema}.affiliate_events_raw r on r.id=c.raw_event_id
+                order by c.updated_at desc limit 10""")
+            conversion_rows = cur.fetchall()
+
+    offer_html = "".join(
+        f"<tr><td>{esc(r['name'])}</td><td>{esc(r['platform'])}</td><td><span class='pill'>{esc(r['status'])}</span></td><td>{esc(r['market'])}</td><td>{money(r['price'], r['currency'])}</td><td>{money(r['commission_value'], r['currency']) if r['commission_value'] is not None else '—'}</td></tr>"
+        for r in offer_rows
+    ) or "<tr><td colspan='6' class='empty'>Nenhuma oferta real cadastrada no Core.</td></tr>"
+    opp_html = "".join(
+        f"<tr><td>{esc(r['offer_name'])}</td><td>{esc(r['angle'])}</td><td>{esc(r['market'])}</td><td>{float(r['score'] or 0):.4f}</td><td><span class='pill'>{esc(r['status'])}</span></td></tr>"
+        for r in opportunity_rows
+    ) or "<tr><td colspan='5' class='empty'>Nenhuma oportunidade criada.</td></tr>"
+    event_html = "".join(
+        f"<tr><td>{esc(r['received_at'].strftime('%d/%m %H:%M:%S'))}</td><td>{esc(r['event_type'])}</td><td>{esc(r['product_name'])}</td><td>{masked_transaction(r['transaction'])}</td><td><span class='tag {'test' if r['is_test'] else 'commercial'}'>{'TESTE HOTMART' if r['is_test'] else 'COMERCIAL'}</span></td><td>{esc(r['processing_status'])}</td></tr>"
+        for r in event_rows
+    ) or "<tr><td colspan='6' class='empty'>Nenhum evento Hotmart recebido.</td></tr>"
+    conversion_html = "".join(
+        f"<tr><td>{masked_transaction(r['external_sale_id'])}</td><td><span class='pill'>{esc(r['status'])}</span></td><td>{money(r['gross_value'], r['currency'])}</td><td>{money(r['commission_value'], r['currency'])}</td><td>{'TESTE HOTMART' if r['is_test'] else 'COMERCIAL'}</td><td>{esc(r['occurred_at'].strftime('%d/%m/%Y %H:%M'))}</td></tr>"
+        for r in conversion_rows
+    ) or "<tr><td colspan='6' class='empty'>Nenhuma conversão registrada.</td></tr>"
+
+    hottok_status = "CONFIGURADO" if bool(settings.hotmart_hottok) else "NÃO CONFIGURADO"
+    db_status = "OPERACIONAL" if table_count == 10 else f"ATENÇÃO ({table_count}/10 tabelas)"
+    now = datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%M:%S UTC")
+    page = f"""<!doctype html><html lang='pt-BR'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>Robo Global — Controle</title><meta http-equiv='refresh' content='30'>
+<style>
+:root{{--bg:#071019;--panel:#0d1823;--panel2:#111f2c;--line:#203244;--text:#edf4fa;--muted:#8fa4b7;--ok:#57d49b;--warn:#f1bf5b;--blue:#79aefc}}
+*{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--text);font-family:Inter,Segoe UI,Arial,sans-serif}}main{{max-width:1280px;margin:auto;padding:34px 22px 60px}}
+header{{display:flex;justify-content:space-between;gap:20px;align-items:flex-end;margin-bottom:26px}}h1{{margin:0;font-size:28px;letter-spacing:.2px}}h2{{font-size:17px;margin:0 0 14px}}.sub{{color:var(--muted);font-size:13px;margin-top:7px}}.stamp{{color:var(--muted);font-size:12px;text-align:right}}
+.grid{{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;margin-bottom:22px}}.card{{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:14px;padding:16px;min-height:112px}}.label{{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px}}.value{{font-size:25px;font-weight:700;margin-top:12px}}.small{{font-size:12px;color:var(--muted);margin-top:6px}}.ok{{color:var(--ok)}}.warn{{color:var(--warn)}}
+section{{background:var(--panel);border:1px solid var(--line);border-radius:14px;margin-top:14px;padding:18px;overflow:auto}}table{{width:100%;border-collapse:collapse;min-width:760px}}th,td{{padding:11px 9px;border-bottom:1px solid var(--line);text-align:left;font-size:12px}}th{{color:var(--muted);font-weight:600}}.pill,.tag{{display:inline-block;border:1px solid #35506a;border-radius:999px;padding:3px 8px;font-size:10px;text-transform:uppercase}}.tag.test{{border-color:#8a6b2a;color:#f4cd74}}.tag.commercial{{border-color:#277956;color:#67dda9}}.empty{{color:var(--muted);padding:20px 9px}}.notice{{margin-top:18px;color:var(--muted);font-size:12px;line-height:1.5}}@media(max-width:900px){{.grid{{grid-template-columns:repeat(2,1fr)}}header{{display:block}}.stamp{{text-align:left;margin-top:10px}}}}@media(max-width:520px){{.grid{{grid-template-columns:1fr}}}}
+</style></head><body><main>
+<header><div><h1>Robô Global — Controle Operacional</h1><div class='sub'>Evidência direta do Core. Somente leitura, sem dados pessoais e sem métricas simuladas.</div></div><div class='stamp'>Atualizado em {now}<br>Atualização automática a cada 30 s</div></header>
+<div class='grid'>
+<div class='card'><div class='label'>API Core</div><div class='value ok'>ONLINE</div><div class='small'>{esc(settings.environment)}</div></div>
+<div class='card'><div class='label'>Banco</div><div class='value {'ok' if table_count == 10 else 'warn'}'>{db_status}</div><div class='small'>{table_count} tabelas canônicas</div></div>
+<div class='card'><div class='label'>Hotmart</div><div class='value {'ok' if settings.hotmart_hottok else 'warn'}'>{hottok_status}</div><div class='small'>Webhook V2 autenticado</div></div>
+<div class='card'><div class='label'>Ofertas</div><div class='value'>{offers['n']}</div><div class='small'>{offers['active']} ativas</div></div>
+<div class='card'><div class='label'>Oportunidades</div><div class='value'>{opportunities['n']}</div><div class='small'>{opportunities['active']} em teste/vencedoras · {redirects} redirects</div></div>
+<div class='card'><div class='label'>Comissão líquida comercial</div><div class='value'>{money(net_commission)}</div><div class='small'>{conversions['commercial']} conversões comerciais · {conversions['tests']} de teste</div></div>
+</div>
+<section><h2>Ofertas no Core</h2><table><thead><tr><th>Oferta</th><th>Plataforma</th><th>Status</th><th>Mercado</th><th>Preço</th><th>Comissão estimada</th></tr></thead><tbody>{offer_html}</tbody></table></section>
+<section><h2>Oportunidades econômicas</h2><table><thead><tr><th>Oferta</th><th>Ângulo</th><th>Mercado</th><th>Score</th><th>Status</th></tr></thead><tbody>{opp_html}</tbody></table></section>
+<section><h2>Últimas conversões</h2><table><thead><tr><th>Transação</th><th>Status</th><th>Valor bruto</th><th>Comissão</th><th>Origem</th><th>Ocorrência</th></tr></thead><tbody>{conversion_html}</tbody></table></section>
+<section><h2>Últimos eventos Hotmart</h2><table><thead><tr><th>Recebido</th><th>Evento</th><th>Produto</th><th>Transação</th><th>Origem</th><th>Processamento</th></tr></thead><tbody>{event_html}</tbody></table></section>
+<div class='notice'>Critério de separação: eventos oficiais de teste da Hotmart são identificados pelos marcadores do payload de teste (produto id 0, produto identificado como teste ou e-mail @example.com). Eles permanecem auditáveis, mas não entram na comissão comercial. Este painel não exibe e-mail, IP, token, URL de afiliado ou payload bruto.</div>
+</main></body></html>"""
+    return HTMLResponse(page)
 
 
 @app.post("/v1/demands", status_code=201)
