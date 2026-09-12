@@ -33,7 +33,7 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-app = FastAPI(title="Robo Global Core API", version="1.0.0-alpha.2")
+app = FastAPI(title="Robo Global Core API", version="1.0.0-alpha.3")
 
 
 def db_connection():
@@ -107,6 +107,19 @@ def insert_raw_event(cur, platform: str, external_event_id: str | None, event_ty
         cur.execute(f"select id from {settings.core_schema}.affiliate_events_raw where payload_hash=%s", (payload_hash,))
     existing = cur.fetchone()
     return (existing["id"] if existing else None), False
+
+
+def economic_effect(status: str, commission_value: Decimal) -> tuple[str, Decimal] | None:
+    amount = abs(commission_value)
+    if amount == 0:
+        return None
+    if status == "approved":
+        return "commission_accrued", amount
+    if status == "refunded":
+        return "refund", -amount
+    if status == "chargeback":
+        return "chargeback", -amount
+    return None
 
 
 @app.on_event("startup")
@@ -318,6 +331,14 @@ async def hotmart_webhook(request: Request, x_hotmart_hottok: str | None = Heade
             values ('HOTMART',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             on conflict (platform,external_sale_id) do update set offer_id=coalesce(excluded.offer_id,{settings.core_schema}.conversions.offer_id),opportunity_id=coalesce(excluded.opportunity_id,{settings.core_schema}.conversions.opportunity_id),interaction_id=coalesce(excluded.interaction_id,{settings.core_schema}.conversions.interaction_id),attribution_key=coalesce(excluded.attribution_key,{settings.core_schema}.conversions.attribution_key),gross_value=excluded.gross_value,commission_value=excluded.commission_value,currency=excluded.currency,status=excluded.status,occurred_at=excluded.occurred_at,raw_event_id=excluded.raw_event_id,updated_at=now() returning id""",
             (normalized.external_sale_id,offer_id,opportunity_id,interaction_id,normalized.attribution_key,normalized.gross_value,normalized.commission_value,normalized.currency,normalized.status,occurred,raw_id)); conversion=cur.fetchone()
+            effect=economic_effect(normalized.status,normalized.commission_value)
+            if effect:
+                event_type,amount=effect
+                cur.execute(f"""insert into {settings.core_schema}.economic_outcomes
+                (conversion_id,opportunity_id,raw_event_id,event_type,amount,currency,occurred_at)
+                values (%s,%s,%s,%s,%s,%s,%s)
+                on conflict (raw_event_id) do nothing""",
+                (conversion["id"],opportunity_id,raw_id,event_type,amount,normalized.currency,occurred))
             cur.execute(f"update {settings.core_schema}.affiliate_events_raw set processing_status='processed',processed_at=now() where id=%s",(raw_id,))
         conn.commit()
     return {"status":"processed","event_id":str(raw_id),"conversion_id":str(conversion["id"])}
