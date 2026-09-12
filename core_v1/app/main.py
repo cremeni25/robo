@@ -47,6 +47,21 @@ def require_ingest_key(x_core_ingest_key: str = Header(default="")) -> None:
         raise HTTPException(status_code=401, detail="invalid ingest key")
 
 
+def classify_db_error(exc: Exception) -> str:
+    message = str(exc).lower()
+    if "password authentication failed" in message or "authentication failed" in message:
+        return "authentication_failed"
+    if "could not translate host" in message or "name or service not known" in message:
+        return "dns_failed"
+    if "connection refused" in message or "timeout" in message:
+        return "connection_failed"
+    if "invalid uri" in message or "invalid dsn" in message or "missing '='" in message:
+        return "database_url_invalid"
+    if "percent" in message or "escape" in message:
+        return "database_url_encoding_error"
+    return exc.__class__.__name__
+
+
 def clamp01(value: Decimal) -> Decimal:
     if value < 0:
         return Decimal("0")
@@ -108,16 +123,7 @@ def startup_database_probe() -> None:
                 row = cur.fetchone()
         logger.info("CORE_DB_READY schema=%s tables=%s", settings.core_schema, row["tables"])
     except Exception as exc:
-        message = str(exc).lower()
-        if "password authentication failed" in message or "authentication failed" in message:
-            category = "authentication_failed"
-        elif "could not translate host" in message or "name or service not known" in message:
-            category = "dns_failed"
-        elif "connection refused" in message or "timeout" in message:
-            category = "connection_failed"
-        else:
-            category = exc.__class__.__name__
-        logger.error("CORE_DB_NOT_READY category=%s", category)
+        logger.error("CORE_DB_NOT_READY category=%s", classify_db_error(exc))
 
 
 class DemandCreate(BaseModel):
