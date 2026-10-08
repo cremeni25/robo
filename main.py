@@ -1284,6 +1284,34 @@ def listar_dores_subnicho_publicas(subnicho_id: uuid.UUID):
         log("PUBLIC", "ERRO", "Falha ao buscar dores")
         raise HTTPException(status_code=503, detail="Catalogo temporariamente indisponivel")
 
+# B1 — public approved solutions linked to a published pain.
+# This is a read-only catalog endpoint; no click tracking or personal data.
+@app.get("/public/dores/{dor_id}/solucoes")
+def listar_solucoes_publicas_dor(dor_id: uuid.UUID):
+    try:
+        pain = table_rg("dores").select("id,subnicho_id,slug").eq("id", str(dor_id)).eq("published", True).limit(1).execute()
+        if not pain.data or str(pain.data[0]["slug"]).lower().startswith(("teste-", "test-")):
+            raise HTTPException(status_code=404, detail="Dor nao encontrada")
+        sub = table_rg("subnichos").select("id,nicho_id,slug").eq("id", pain.data[0]["subnicho_id"]).eq("published", True).limit(1).execute()
+        if not sub.data or str(sub.data[0]["slug"]).lower().startswith(("teste-", "test-")):
+            raise HTTPException(status_code=404, detail="Subnicho nao encontrado")
+        parent = table_rg("nichos").select("id,slug").eq("id", sub.data[0]["nicho_id"]).eq("published", True).limit(1).execute()
+        if not parent.data or str(parent.data[0]["slug"]).lower().startswith(("teste-", "test-")):
+            raise HTTPException(status_code=404, detail="Nicho nao encontrado")
+        links = table_rg("dor_solucoes").select("solucao_id,prioridade").eq("dor_id", str(dor_id)).eq("published", True).order("prioridade", desc=True).execute()
+        ids = [x["solucao_id"] for x in (links.data or [])]
+        if not ids:
+            return {"status": "OK", "total": 0, "data": []}
+        products = sb.table("solucoes").select("id,nome,descricao,link_afiliado,ativo").in_("id", ids).eq("ativo", True).execute()
+        lookup = {str(x["id"]): x for x in (products.data or [])}
+        items = [{"id": str(k), "title": lookup[str(k)]["nome"], "description": lookup[str(k)].get("descricao") or "", "url": lookup[str(k)]["link_afiliado"]} for k in ids if str(k) in lookup and str(lookup[str(k)].get("link_afiliado") or "").startswith(("https://", "http://"))]
+        return {"status": "OK", "total": len(items), "data": items}
+    except HTTPException:
+        raise
+    except Exception:
+        log("PUBLIC", "ERRO", "Falha ao consultar solucoes da dor")
+        raise HTTPException(status_code=503, detail="Solucoes temporariamente indisponiveis")
+
 # ================================
 # 🔹 ENDPOINT SEGURO — NICHOS PUBLICOS
 # NÃO ALTERA NADA EXISTENTE
