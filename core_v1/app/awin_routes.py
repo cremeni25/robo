@@ -9,6 +9,7 @@ import os
 from urllib.request import Request, urlopen
 import logging
 from threading import Thread
+from urllib.error import HTTPError
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -102,6 +103,8 @@ def _startup_feed_probe():
             raise ValueError("feed too large")
         offers = parse_feed(content, compressed=content.startswith(bytes([0x1f, 0x8b])), max_rows=10000)
         logging.getLogger("robo-global-core").info("AWIN_PROBE success candidates=%s publication_enabled=false database_writes=0", len(offers))
+    except HTTPError as exc:
+        logging.getLogger("robo-global-core").error("AWIN_PROBE failed category=HTTPError status=%s", exc.code)
     except Exception as exc:
         logging.getLogger("robo-global-core").error("AWIN_PROBE failed category=%s", type(exc).__name__)
 
