@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 import logging
 from threading import Thread
 from urllib.error import HTTPError
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qsl
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -94,6 +94,7 @@ def _startup_feed_probe():
         parsed = urlparse(url)
         if parsed.scheme != "https" or parsed.hostname not in {"productdata.awin.com", "ui.awin.com"}:
             raise ValueError("unapproved feed host")
+        logging.getLogger("robo-global-core").info("AWIN_PROBE url_shape host=%s path=%s query_keys=%s", parsed.hostname, parsed.path, sorted({k for k, _ in parse_qsl(parsed.query, keep_blank_values=True)}))
         req = Request(url, headers={"User-Agent": "RoboGlobalCore/1.0"})
         with urlopen(req, timeout=45) as response:
             if urlparse(response.geturl()).hostname not in {"productdata.awin.com", "ui.awin.com"}:
