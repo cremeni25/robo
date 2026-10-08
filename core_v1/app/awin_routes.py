@@ -105,7 +105,22 @@ def _startup_feed_probe():
         offers = parse_feed(content, compressed=content.startswith(bytes([0x1f, 0x8b])), max_rows=10000)
         logging.getLogger("robo-global-core").info("AWIN_PROBE success candidates=%s publication_enabled=false database_writes=0", len(offers))
     except HTTPError as exc:
-        logging.getLogger("robo-global-core").error("AWIN_PROBE failed category=HTTPError status=%s response_type=%s", exc.code, (exc.headers.get("Content-Type", "unknown").split(";")[0] if exc.headers else "unknown"))
+        category = "unclassified"
+        try:
+            import json
+            body = json.loads(exc.read(4096).decode("utf-8", errors="replace"))
+            message = str(body.get("message", "") if isinstance(body, dict) else "").lower()
+            if any(term in message for term in ("column", "field", "format", "delimiter", "parameter", "invalid request")):
+                category = "invalid_feed_parameters"
+            elif any(term in message for term in ("feed", "advertiser", "not found", "no products")):
+                category = "feed_unavailable"
+            elif any(term in message for term in ("api key", "apikey", "authentication", "unauthorized", "access", "permission")):
+                category = "feed_key_or_access"
+            elif isinstance(body, dict):
+                category = "json_error_keys_" + "_".join(sorted(k for k in body if k in {"message", "error", "errors", "status", "code"}))
+        except Exception:
+            pass
+        logging.getLogger("robo-global-core").error("AWIN_PROBE failed category=HTTPError status=%s reason_category=%s", exc.code, category)
     except Exception as exc:
         logging.getLogger("robo-global-core").error("AWIN_PROBE failed category=%s", type(exc).__name__)
 
