@@ -885,6 +885,53 @@ def cms_criar_dor(payload: DorCMS, request: Request):
 class PublicacaoCMS(BaseModel):
     published: bool
 
+class VinculoSolucaoCMS(BaseModel):
+    dor_id: uuid.UUID
+    solucao_id: uuid.UUID
+    prioridade: int = 1
+
+@app.post("/cms/b1/vinculos")
+def cms_vincular_solucao(payload: VinculoSolucaoCMS, request: Request):
+    validar_master(request)
+    if payload.prioridade < 0:
+        raise HTTPException(status_code=422, detail="Prioridade invalida")
+    dor = table_rg("dores").select("id").eq("id", str(payload.dor_id)).limit(1).execute()
+    if not dor.data:
+        raise HTTPException(status_code=404, detail="Dor nao encontrada")
+    sol = sb.table("solucoes").select("id,ativo,link_afiliado").eq("id", str(payload.solucao_id)).limit(1).execute()
+    if not sol.data or not sol.data[0].get("ativo") or not str(sol.data[0].get("link_afiliado") or "").startswith(("https://","http://")):
+        raise HTTPException(status_code=409, detail="Solucao inexistente, inativa ou sem link valido")
+    try:
+        result = table_rg("dor_solucoes").upsert({"dor_id":str(payload.dor_id),"solucao_id":str(payload.solucao_id),"prioridade":payload.prioridade,"published":False}, on_conflict="dor_id,solucao_id").execute()
+        return {"status":"OK","data":result.data,"published":False}
+    except Exception:
+        raise HTTPException(status_code=503, detail="Nao foi possivel registrar o vinculo")
+
+@app.patch("/cms/b1/vinculos/{vinculo_id}/publicacao")
+def cms_publicar_vinculo(vinculo_id: uuid.UUID, payload: PublicacaoCMS, request: Request):
+    validar_master(request)
+    existing=table_rg("dor_solucoes").select("id,dor_id,solucao_id").eq("id",str(vinculo_id)).limit(1).execute()
+    if not existing.data:
+        raise HTTPException(status_code=404, detail="Vinculo nao encontrado")
+    if payload.published:
+        dor=table_rg("dores").select("subnicho_id,slug").eq("id",existing.data[0]["dor_id"]).eq("published",True).limit(1).execute()
+        if not dor.data or str(dor.data[0]["slug"]).lower().startswith(("teste-","test-")):
+            raise HTTPException(status_code=409, detail="Dor nao publicada")
+        sub=table_rg("subnichos").select("nicho_id,slug").eq("id",dor.data[0]["subnicho_id"]).eq("published",True).limit(1).execute()
+        if not sub.data or str(sub.data[0]["slug"]).lower().startswith(("teste-","test-")):
+            raise HTTPException(status_code=409, detail="Subnicho nao publicado")
+        nicho=table_rg("nichos").select("slug").eq("id",sub.data[0]["nicho_id"]).eq("published",True).limit(1).execute()
+        if not nicho.data or str(nicho.data[0]["slug"]).lower().startswith(("teste-","test-")):
+            raise HTTPException(status_code=409, detail="Nicho nao publicado")
+        sol=sb.table("solucoes").select("ativo,link_afiliado").eq("id",existing.data[0]["solucao_id"]).limit(1).execute()
+        if not sol.data or not sol.data[0].get("ativo") or not str(sol.data[0].get("link_afiliado") or "").startswith(("https://","http://")):
+            raise HTTPException(status_code=409, detail="Solucao nao elegivel")
+    table_rg("dor_solucoes").update({"published":payload.published}).eq("id",str(vinculo_id)).execute()
+    return {"status":"OK","id":str(vinculo_id),"published":payload.published}
+
+
+    published: bool
+
 @app.patch("/cms/b1/{nivel}/{item_id}/publicacao")
 def cms_publicar_b1(nivel: str, item_id: uuid.UUID, payload: PublicacaoCMS, request: Request):
     validar_master(request)
