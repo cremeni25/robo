@@ -148,7 +148,7 @@ def _startup_feed_probe():
             pass
         logging.getLogger("robo-global-core").error("AWIN_PROBE failed category=HTTPError status=%s reason_category=%s", exc.code, category)
     except Exception as exc:
-        logging.getLogger("robo-global-core").error("AWIN_PROBE failed category=%s", type(exc).__name__)
+        logging.getLogger("robo-global-core").error("AWIN_PROBE failed category=%s sqlstate=%s", type(exc).__name__, getattr(exc, "sqlstate", "none"))
 
 
 @router.on_event("startup")
