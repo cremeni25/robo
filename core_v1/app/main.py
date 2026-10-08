@@ -268,6 +268,19 @@ def control_panel():
             cur.execute(f"""select o.name,o.platform,o.status,o.market,o.language,o.currency,o.price,o.commission_value,o.tracking_strategy
                 from {settings.core_schema}.offers o order by o.updated_at desc limit 8""")
             offer_rows = cur.fetchall()
+            cur.execute(f"""select status,count(*) n from {settings.core_schema}.offers group by status order by n desc""")
+            offer_status_rows = cur.fetchall()
+            cur.execute(f"""select coalesce(nullif(evidence->>'merchant_id',''),'Não identificado') merchant,
+                count(*) n from {settings.core_schema}.offers where platform='AWIN'
+                group by 1 order by n desc limit 12""")
+            merchant_rows = cur.fetchall()
+            cur.execute(f"""select coalesce(nullif(evidence->'product_feed_record'->>'product_type',''),
+                nullif(evidence->'product_feed_record'->>'google_product_category',''),
+                'Sem classificação') category,count(*) n
+                from {settings.core_schema}.offers where platform='AWIN'
+                group by 1 order by n desc limit 12""")
+            category_rows = cur.fetchall()
+
             cur.execute(f"""select op.angle,op.market,op.language,op.score,op.status,ofr.name offer_name
                 from {settings.core_schema}.opportunities op
                 join {settings.core_schema}.offers ofr on ofr.id=op.offer_id
@@ -291,6 +304,9 @@ def control_panel():
         f"<tr><td>{esc(r['name'])}</td><td>{esc(r['platform'])}</td><td><span class='pill'>{esc(r['status'])}</span></td><td>{esc(r['market'])}</td><td>{money(r['price'], r['currency'])}</td><td>{money(r['commission_value'], r['currency']) if r['commission_value'] is not None else '—'}</td></tr>"
         for r in offer_rows
     ) or "<tr><td colspan='6' class='empty'>Nenhuma oferta real cadastrada no Core.</td></tr>"
+    status_html = "".join(f"<tr><td>{esc(r['status'])}</td><td>{r['n']}</td></tr>" for r in offer_status_rows)
+    merchant_html = "".join(f"<tr><td>{esc(r['merchant'])}</td><td>{r['n']}</td><td>Afiliação não verificada</td></tr>" for r in merchant_rows)
+    category_html = "".join(f"<tr><td>{esc(r['category'])}</td><td>{r['n']}</td></tr>" for r in category_rows)
     opp_html = "".join(
         f"<tr><td>{esc(r['offer_name'])}</td><td>{esc(r['angle'])}</td><td>{esc(r['market'])}</td><td>{float(r['score'] or 0):.4f}</td><td><span class='pill'>{esc(r['status'])}</span></td></tr>"
         for r in opportunity_rows
@@ -325,6 +341,15 @@ section{{background:var(--panel);border:1px solid var(--line);border-radius:14px
 <div class='card'><div class='label'>Oportunidades</div><div class='value'>{opportunities['n']}</div><div class='small'>{opportunities['active']} em teste/vencedoras · {redirects} redirects</div></div>
 <div class='card'><div class='label'>Comissão líquida comercial</div><div class='value'>{money(net_commission)}</div><div class='small'>{conversions['commercial']} conversões comerciais · {conversions['tests']} de teste</div></div>
 </div>
+<section><h2>Inteligência Awin · dados reais</h2><div class='sub'>Produtos recebidos não equivalem a programas aprovados. Categorias exibidas conforme feed, sem atribuir artificialmente os oito setores comerciais.</div>
+<div class='grid' style='grid-template-columns:repeat(3,minmax(0,1fr));margin-top:14px'>
+<div class='card'><div class='label'>Candidatos Awin</div><div class='value'>{sum(r['n'] for r in offer_status_rows if r['status']=='candidate')}</div><div class='small'>Não publicáveis</div></div>
+<div class='card'><div class='label'>Anunciantes no feed</div><div class='value'>{len(merchant_rows)}</div><div class='small'>Identificadores encontrados (até 12)</div></div>
+<div class='card'><div class='label'>Publicação automática</div><div class='value warn'>BLOQUEADA</div><div class='small'>Exige comprovação de elegibilidade</div></div></div>
+<h2>Status das ofertas</h2><table><thead><tr><th>Status</th><th>Quantidade</th></tr></thead><tbody>{status_html}</tbody></table>
+<h2 style='margin-top:20px'>Anunciantes identificados</h2><table><thead><tr><th>ID do anunciante</th><th>Produtos</th><th>Elegibilidade</th></tr></thead><tbody>{merchant_html}</tbody></table>
+<h2 style='margin-top:20px'>Categorias informadas pelo feed</h2><table><thead><tr><th>Categoria original</th><th>Produtos</th></tr></thead><tbody>{category_html}</tbody></table>
+</section>
 <section><h2>Ofertas no Core</h2><table><thead><tr><th>Oferta</th><th>Plataforma</th><th>Status</th><th>Mercado</th><th>Preço</th><th>Comissão estimada</th></tr></thead><tbody>{offer_html}</tbody></table></section>
 <section><h2>Oportunidades econômicas</h2><table><thead><tr><th>Oferta</th><th>Ângulo</th><th>Mercado</th><th>Score</th><th>Status</th></tr></thead><tbody>{opp_html}</tbody></table></section>
 <section><h2>Últimas conversões</h2><table><thead><tr><th>Transação</th><th>Status</th><th>Valor bruto</th><th>Comissão</th><th>Origem</th><th>Ocorrência</th></tr></thead><tbody>{conversion_html}</tbody></table></section>
