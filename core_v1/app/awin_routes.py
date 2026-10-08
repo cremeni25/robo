@@ -126,6 +126,10 @@ def _startup_feed_probe():
             raise ValueError("feed too large")
         offers = parse_feed(content, compressed=content.startswith(bytes([0x1f, 0x8b])), max_rows=10000)
         logging.getLogger("robo-global-core").warning("AWIN_PROBE success candidates=%s publication_enabled=false database_writes=0", len(offers))
+        if os.getenv("AWIN_CANDIDATE_IMPORT_ON_STARTUP") == "true" and offers:
+            with connect(os.environ["DATABASE_URL"]) as conn:
+                summary = import_offers(conn, offers, {}, reviewed_terms=set(), dry_run=False)
+            logging.getLogger("robo-global-core").warning("AWIN_CANDIDATE_IMPORT completed discovered=%s candidates=%s imported=%s publication_enabled=false", summary.discovered, summary.candidates, summary.imported)
     except HTTPError as exc:
         category = "unclassified"
         try:
