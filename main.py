@@ -885,6 +885,19 @@ def cms_criar_dor(payload: DorCMS, request: Request):
 class PublicacaoCMS(BaseModel):
     published: bool
 
+@app.get("/cms/b1/inventario")
+def cms_inventario_b1(request: Request):
+    validar_master(request)
+    try:
+        nichos = table_rg("nichos").select("id,slug,title,description,published").order("title").execute().data or []
+        subnichos = table_rg("subnichos").select("id,nicho_id,slug,title,description,published").order("title").execute().data or []
+        dores = table_rg("dores").select("id,subnicho_id,slug,title,description,published").order("title").execute().data or []
+        vinculos = table_rg("dor_solucoes").select("id,dor_id,solucao_id,prioridade,published").execute().data or []
+        solucoes = sb.table("solucoes").select("id,nome,descricao,ativo").execute().data or []
+        return {"status":"OK","data":{"nichos":nichos,"subnichos":subnichos,"dores":dores,"vinculos":vinculos,"solucoes":solucoes}}
+    except Exception:
+        raise HTTPException(status_code=503, detail="Inventario B1 indisponivel")
+
 class VinculoSolucaoCMS(BaseModel):
     dor_id: uuid.UUID
     solucao_id: uuid.UUID
