@@ -95,6 +95,14 @@ def _startup_feed_probe():
         if parsed.scheme != "https" or parsed.hostname not in {"productdata.awin.com", "ui.awin.com"}:
             raise ValueError("unapproved feed host")
         logging.getLogger("robo-global-core").warning("AWIN_PROBE url_shape host=%s path_segments=%s query_keys=%s", parsed.hostname, len([segment for segment in parsed.path.split("/") if segment]), sorted({k for k, _ in parse_qsl(parsed.query, keep_blank_values=True)}))
+        from urllib.parse import quote, urlsplit, urlunsplit
+        # Awin's feed builder can emit unescaped reserved characters in path values.
+        # Preserve structural separators, percent escapes and existing query values.
+        parts = urlsplit(url)
+        safe_path = quote(parts.path, safe="/%:@-._~")
+        if safe_path != parts.path:
+            url = urlunsplit((parts.scheme, parts.netloc, safe_path, parts.query, parts.fragment))
+            logging.getLogger("robo-global-core").warning("AWIN_PROBE encoded_reserved_path_characters=true")
         req = Request(url, headers={"User-Agent": "RoboGlobalCore/1.0"})
         with urlopen(req, timeout=45) as response:
             if urlparse(response.geturl()).hostname not in {"productdata.awin.com", "ui.awin.com"}:
