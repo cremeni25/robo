@@ -1216,7 +1216,7 @@ def table_rg(nome_tabela: str):
 @app.get("/public/nichos")
 def listar_nichos_publicos():
     try:
-        resp = table_rg("nichos").select("id,title,slug,description").execute()
+        resp = table_rg("nichos").select("id,title,slug,description").eq("published", True).execute()
         items = [row for row in (resp.data or []) if not str(row.get("slug", "")).startswith("teste-")]
         return {"status": "OK", "total": len(items), "data": items}
     except Exception as e:
@@ -1227,10 +1227,10 @@ def listar_nichos_publicos():
 @app.get("/public/nichos/{nicho_slug}/subnichos")
 def listar_subnichos_publicos(nicho_slug: str):
     try:
-        parent = table_rg("nichos").select("id,slug").eq("slug", nicho_slug).limit(1).execute()
+        parent = table_rg("nichos").select("id,slug").eq("slug", nicho_slug).eq("published", True).limit(1).execute()
         if not parent.data or nicho_slug.lower().startswith(("teste-", "test-")):
             raise HTTPException(status_code=404, detail="Nicho nao encontrado")
-        result = table_rg("subnichos").select("id,nicho_id,slug,title,description").eq("nicho_id", parent.data[0]["id"]).execute()
+        result = table_rg("subnichos").select("id,nicho_id,slug,title,description").eq("nicho_id", parent.data[0]["id"]).eq("published", True).execute()
         items = [row for row in (result.data or []) if not str(row.get("slug", "")).lower().startswith(("teste-", "test-"))]
         return {"status": "OK", "total": len(items), "data": items}
     except HTTPException:
@@ -1242,13 +1242,13 @@ def listar_subnichos_publicos(nicho_slug: str):
 @app.get("/public/subnichos/{subnicho_id}/dores")
 def listar_dores_subnicho_publicas(subnicho_id: uuid.UUID):
     try:
-        sub = table_rg("subnichos").select("id,nicho_id,slug").eq("id", str(subnicho_id)).limit(1).execute()
+        sub = table_rg("subnichos").select("id,nicho_id,slug").eq("id", str(subnicho_id)).eq("published", True).limit(1).execute()
         if not sub.data or str(sub.data[0]["slug"]).lower().startswith(("teste-", "test-")):
             raise HTTPException(status_code=404, detail="Subnicho nao encontrado")
-        parent = table_rg("nichos").select("slug").eq("id", sub.data[0]["nicho_id"]).limit(1).execute()
+        parent = table_rg("nichos").select("slug").eq("id", sub.data[0]["nicho_id"]).eq("published", True).limit(1).execute()
         if not parent.data or str(parent.data[0]["slug"]).lower().startswith(("teste-", "test-")):
             raise HTTPException(status_code=404, detail="Nicho nao encontrado")
-        result = table_rg("dores").select("id,subnicho_id,slug,title,description").eq("subnicho_id", str(subnicho_id)).execute()
+        result = table_rg("dores").select("id,subnicho_id,slug,title,description").eq("subnicho_id", str(subnicho_id)).eq("published", True).execute()
         items = [row for row in (result.data or []) if not str(row.get("slug", "")).lower().startswith(("teste-", "test-"))]
         return {"status": "OK", "total": len(items), "data": items}
     except HTTPException:
