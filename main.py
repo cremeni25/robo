@@ -831,11 +831,10 @@ def cms_criar_nicho(payload: NichoCMS, request: Request):
     validar_master(request)
 
     try:
-        sb.table("nichos").insert({
+        table_rg("nichos").insert({
             "title": payload.title,
             "slug": payload.slug,
-            "description": payload.description,
-            "created_at": utc_now_iso()
+            "description": payload.description
         }).execute()
 
         log("CMS", "INFO", f"Nicho criado via MASTER: {payload.slug}")
