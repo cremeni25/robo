@@ -114,7 +114,7 @@ def _startup_feed_probe():
         if removed_adult_filter:
             logging.getLogger("robo-global-core").warning("AWIN_PROBE removed_unsupported_adultcontent_filter=true")
         safe_path = quote("/".join(filtered), safe="/%:@-._~")
-        if safe_path != parts.path:
+        if safe_path != parts.path or removed_adult_filter:
             url = urlunsplit((parts.scheme, parts.netloc, safe_path, parts.query, parts.fragment))
             logging.getLogger("robo-global-core").warning("AWIN_PROBE encoded_reserved_path_characters=true")
         req = Request(url, headers={"User-Agent": "RoboGlobalCore/1.0"})
