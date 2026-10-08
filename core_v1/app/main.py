@@ -341,7 +341,7 @@ section{{background:var(--panel);border:1px solid var(--line);border-radius:14px
 <div class='card'><div class='label'>Oportunidades</div><div class='value'>{opportunities['n']}</div><div class='small'>{opportunities['active']} em teste/vencedoras · {redirects} redirects</div></div>
 <div class='card'><div class='label'>Comissão líquida comercial</div><div class='value'>{money(net_commission)}</div><div class='small'>{conversions['commercial']} conversões comerciais · {conversions['tests']} de teste</div></div>
 </div>
-<section><h2>Inteligência Awin · dados reais</h2><div class='sub'>Produtos recebidos não equivalem a programas aprovados. Categorias exibidas conforme feed, sem atribuir artificialmente os oito setores comerciais.</div>
+<section><h2>Inteligência Awin · dados reais</h2><p><a style="color:#79aefc" href="/control/offers">Explorar catálogo de produtos →</a></p><div class='sub'>Produtos recebidos não equivalem a programas aprovados. Categorias exibidas conforme feed, sem atribuir artificialmente os oito setores comerciais.</div>
 <div class='grid' style='grid-template-columns:repeat(3,minmax(0,1fr));margin-top:14px'>
 <div class='card'><div class='label'>Candidatos Awin</div><div class='value'>{sum(r['n'] for r in offer_status_rows if r['status']=='candidate')}</div><div class='small'>Não publicáveis</div></div>
 <div class='card'><div class='label'>Anunciantes no feed</div><div class='value'>{len(merchant_rows)}</div><div class='small'>Identificadores encontrados (até 12)</div></div>
@@ -357,6 +357,78 @@ section{{background:var(--panel);border:1px solid var(--line);border-radius:14px
 <div class='notice'>Critério de separação: eventos oficiais de teste da Hotmart são identificados pelos marcadores do payload de teste (produto id 0, produto identificado como teste ou e-mail @example.com). Eles permanecem auditáveis, mas não entram na comissão comercial. Este painel não exibe e-mail, IP, token, URL de afiliado ou payload bruto.</div>
 </main></body></html>"""
     return HTMLResponse(page)
+
+
+@app.get("/control/offers", response_class=HTMLResponse)
+def control_offers(q: str = "", status: str = "", merchant: str = "", page: int = 1):
+    """Read-only, bounded catalogue explorer. Never exposes affiliate URLs or source payloads."""
+    q = q.strip()[:100]
+    status = status.strip()[:30]
+    merchant = merchant.strip()[:100]
+    page = max(1, min(page, 10000))
+    where = ["platform = 'AWIN'"]
+    params: list[Any] = []
+    if q:
+        where.append("name ILIKE %s")
+        params.append("%" + q.replace("%", r"\\%").replace("_", r"\\_") + "%")
+    if status:
+        where.append("status = %s")
+        params.append(status)
+    if merchant:
+        where.append("evidence->>'merchant_id' = %s")
+        params.append(merchant)
+    condition = " AND ".join(where)
+    with db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"select count(*) n from {settings.core_schema}.offers where {condition}", params)
+            total = cur.fetchone()["n"]
+            cur.execute(f"""select name,status,price,currency,updated_at,
+                coalesce(evidence->>'merchant_id','—') merchant,
+                coalesce(nullif(evidence->'product_feed_record'->>'product_type',''),
+                nullif(evidence->'product_feed_record'->>'google_product_category',''),
+                'Sem classificação') category
+                from {settings.core_schema}.offers where {condition}
+                order by updated_at desc,id limit 30 offset %s""", [*params, (page-1)*30])
+            rows = cur.fetchall()
+    from urllib.parse import urlencode
+    def href(n: int) -> str:
+        return "/control/offers?" + urlencode({"q":q,"status":status,"merchant":merchant,"page":n})
+    table_rows = "".join(
+        f"<tr><td>{esc(r['name'])}</td><td>{esc(r['merchant'])}</td><td>{esc(r['category'])}</td>"
+        f"<td>{money(r['price'],r['currency']) if r['price'] is not None else '—'}</td>"
+        f"<td>{esc(r['status'])}</td></tr>" for r in rows
+    ) or "<tr><td colspan='5'>Nenhum produto encontrado.</td></tr>"
+    pages = max(1,(total+29)//30)
+    previous = f"<a href='{esc(href(page-1))}'>← Anterior</a>" if page>1 else ""
+    following = f"<a href='{esc(href(page+1))}'>Próxima →</a>" if page<pages else ""
+    document = f"""<!doctype html><html lang='pt-BR'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
+    <title>Robô Global — Produtos Awin</title><style>
+    *{{box-sizing:border-box}}body{{background:#071019;color:#edf4fa;font:15px system-ui,Arial;margin:0}}
+    main{{max-width:1200px;margin:auto;padding:24px 16px}}a{{color:#79aefc}}
+    form{{display:flex;flex-wrap:wrap;gap:10px;margin:22px 0}}input,select,button{{padding:12px;border-radius:9px;border:1px solid #35506a;background:#111f2c;color:#edf4fa}}
+    input{{flex:2;min-width:180px}}select{{flex:1;min-width:130px}}button{{cursor:pointer}}
+    section{{overflow:auto;border:1px solid #203244;border-radius:12px;background:#0d1823}}
+    table{{border-collapse:collapse;width:100%;min-width:700px}}td,th{{padding:12px;text-align:left;border-bottom:1px solid #203244}}
+    th{{color:#8fa4b7}}nav{{display:flex;justify-content:space-between;gap:14px;margin-top:18px}}
+    p{{color:#8fa4b7}}@media(max-width:600px){{h1{{font-size:24px}}}}
+    </style></head><body><main>
+    <a href='/control'>← Painel operacional</a><h1>Catálogo Awin</h1>
+    <p>Consulta de produtos reais, somente leitura. Candidatos não estão autorizados para publicação.</p>
+    <form method='get' action='/control/offers'>
+    <input name='q' value='{esc(q)}' placeholder='Buscar produto'>
+    <input name='merchant' value='{esc(merchant)}' placeholder='ID do anunciante'>
+    <select name='status'><option value=''>Todos os status</option>
+    <option value='candidate' {'selected' if status=='candidate' else ''}>Candidatos</option>
+    <option value='validated' {'selected' if status=='validated' else ''}>Validados</option>
+    <option value='active' {'selected' if status=='active' else ''}>Ativos</option>
+    <option value='paused' {'selected' if status=='paused' else ''}>Pausados</option></select>
+    <button type='submit'>Filtrar</button></form>
+    <p>{total} produtos encontrados · página {page} de {pages}</p>
+    <section><table><thead><tr><th>Produto</th><th>Anunciante</th><th>Categoria do feed</th><th>Preço</th><th>Status</th></tr></thead>
+    <tbody>{table_rows}</tbody></table></section>
+    <nav><span>{previous}</span><span>{following}</span></nav>
+    </main></body></html>"""
+    return HTMLResponse(document)
 
 
 @app.post("/v1/demands", status_code=201)
