@@ -19,6 +19,7 @@ from psycopg import connect
 from psycopg.rows import dict_row
 
 from core_v1.app.hotmart import normalize_webhook, validate_hottok
+from core_v1.app.awin_routes import router as awin_router
 
 logger = logging.getLogger("robo-global-core")
 
@@ -34,7 +35,8 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-app = FastAPI(title="Robo Global Core API", version="1.0.0-alpha.4")
+app = FastAPI(title="Robo Global Core API", version="1.0.0-alpha.5")
+app.include_router(awin_router)
 
 
 def db_connection():
