@@ -1229,8 +1229,7 @@ def listar_nichos_publicos():
 # NÃO ALTERA NADA EXISTENTE
 # ================================
 
-@app.get("/public2/nichos")
-def listar_nichos_publicos_seguro():
+def listar_nichos_publicos_legacy_inativo():
     try:
         result = (
             supabase
