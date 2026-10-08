@@ -82,9 +82,11 @@ def eligibility_for_program(program: dict[str, Any], *, has_feed: bool = False,
     status = str(program.get("membershipStatus") or program.get("membership_status") or "").lower()
     if not terms_reviewed:
         return "terms_unverified"
+    if program.get("channel_permitted") is not True:
+        return "channel_unverified"
     if status in {"joined", "approved", "active"}:
         return "verified"
-    if has_feed and soft_membership_verified:
+    if has_feed and soft_membership_verified and program.get("soft_membership_allowed") is True:
         return "verified"
     return "not_authorized"
 
