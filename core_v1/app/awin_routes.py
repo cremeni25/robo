@@ -99,7 +99,21 @@ def _startup_feed_probe():
         # Awin's feed builder can emit unescaped reserved characters in path values.
         # Preserve structural separators, percent escapes and existing query values.
         parts = urlsplit(url)
-        safe_path = quote(parts.path, safe="/%:@-._~")
+        # Awin restricts adult-content filtering to UK/US/CA/IE; BR feeds must omit it.
+        segments = parts.path.split("/")
+        filtered = []
+        removed_adult_filter = False
+        i = 0
+        while i < len(segments):
+            if segments[i].lower() == "adultcontent" and i + 1 < len(segments):
+                removed_adult_filter = True
+                i += 2
+                continue
+            filtered.append(segments[i])
+            i += 1
+        if removed_adult_filter:
+            logging.getLogger("robo-global-core").warning("AWIN_PROBE removed_unsupported_adultcontent_filter=true")
+        safe_path = quote("/".join(filtered), safe="/%:@-._~")
         if safe_path != parts.path:
             url = urlunsplit((parts.scheme, parts.netloc, safe_path, parts.query, parts.fragment))
             logging.getLogger("robo-global-core").warning("AWIN_PROBE encoded_reserved_path_characters=true")
