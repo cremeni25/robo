@@ -850,8 +850,7 @@ def cms_criar_nicho(payload: NichoCMS, request: Request):
 # CMS — LEITURA SEGURA DE NICHOS (PUBLICO VIA API)
 # ==========================================================
 
-@app.get("/public/nichos")
-def listar_nichos_publicos():
+def listar_nichos_publicos_legacy_1():
     """
     Leitura pública segura.
     Frontend não acessa mais Supabase direto.
@@ -874,8 +873,7 @@ def listar_nichos_publicos():
 # PUBLIC — NICHOS GLOBAL (VERSÃO DEFINITIVA)
 # ==========================================================
 
-@app.get("/public/nichos")
-def listar_nichos_publicos():
+def listar_nichos_publicos_legacy_2():
     """
     Endpoint público global.
     Frontend NÃO acessa banco.
@@ -1219,10 +1217,12 @@ def table_rg(nome_tabela: str):
 @app.get("/public/nichos")
 def listar_nichos_publicos():
     try:
-        resp = table_rg("nichos").select("*").execute()
-        return resp.data or []
+        resp = table_rg("nichos").select("id,title,slug,description").execute()
+        items = [row for row in (resp.data or []) if not str(row.get("slug", "")).startswith("teste-")]
+        return {"status": "OK", "total": len(items), "data": items}
     except Exception as e:
-        return {"detail": "Erro ao buscar nichos", "erro": str(e)}
+        log("PUBLIC", "ERRO", "Falha ao buscar nichos publicos")
+        raise HTTPException(status_code=503, detail="Catalogo temporariamente indisponivel")
 
 # ================================
 # 🔹 ENDPOINT SEGURO — NICHOS PUBLICOS
