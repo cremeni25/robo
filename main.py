@@ -64,8 +64,8 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=["https://www.roboglobal.com.br", "https://roboglobal.com.br", "https://robo-global-frontend.onrender.com"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
