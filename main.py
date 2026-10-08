@@ -1223,6 +1223,40 @@ def listar_nichos_publicos():
         log("PUBLIC", "ERRO", "Falha ao buscar nichos publicos")
         raise HTTPException(status_code=503, detail="Catalogo temporariamente indisponivel")
 
+# B1 — hierarchical public catalog (only approved records; test slugs excluded)
+@app.get("/public/nichos/{nicho_slug}/subnichos")
+def listar_subnichos_publicos(nicho_slug: str):
+    try:
+        parent = table_rg("nichos").select("id,slug").eq("slug", nicho_slug).limit(1).execute()
+        if not parent.data or nicho_slug.lower().startswith(("teste-", "test-")):
+            raise HTTPException(status_code=404, detail="Nicho nao encontrado")
+        result = table_rg("subnichos").select("id,nicho_id,slug,title,description").eq("nicho_id", parent.data[0]["id"]).execute()
+        items = [row for row in (result.data or []) if not str(row.get("slug", "")).lower().startswith(("teste-", "test-"))]
+        return {"status": "OK", "total": len(items), "data": items}
+    except HTTPException:
+        raise
+    except Exception:
+        log("PUBLIC", "ERRO", "Falha ao buscar subnichos")
+        raise HTTPException(status_code=503, detail="Catalogo temporariamente indisponivel")
+
+@app.get("/public/subnichos/{subnicho_id}/dores")
+def listar_dores_subnicho_publicas(subnicho_id: uuid.UUID):
+    try:
+        sub = table_rg("subnichos").select("id,nicho_id,slug").eq("id", str(subnicho_id)).limit(1).execute()
+        if not sub.data or str(sub.data[0]["slug"]).lower().startswith(("teste-", "test-")):
+            raise HTTPException(status_code=404, detail="Subnicho nao encontrado")
+        parent = table_rg("nichos").select("slug").eq("id", sub.data[0]["nicho_id"]).limit(1).execute()
+        if not parent.data or str(parent.data[0]["slug"]).lower().startswith(("teste-", "test-")):
+            raise HTTPException(status_code=404, detail="Nicho nao encontrado")
+        result = table_rg("dores").select("id,subnicho_id,slug,title,description").eq("subnicho_id", str(subnicho_id)).execute()
+        items = [row for row in (result.data or []) if not str(row.get("slug", "")).lower().startswith(("teste-", "test-"))]
+        return {"status": "OK", "total": len(items), "data": items}
+    except HTTPException:
+        raise
+    except Exception:
+        log("PUBLIC", "ERRO", "Falha ao buscar dores")
+        raise HTTPException(status_code=503, detail="Catalogo temporariamente indisponivel")
+
 # ================================
 # 🔹 ENDPOINT SEGURO — NICHOS PUBLICOS
 # NÃO ALTERA NADA EXISTENTE
