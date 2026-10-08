@@ -895,7 +895,24 @@ def cms_publicar_b1(nivel: str, item_id: uuid.UUID, payload: PublicacaoCMS, requ
     existing=table_rg(table).select("id").eq("id",str(item_id)).limit(1).execute()
     if not existing.data:
         raise HTTPException(status_code=404, detail="Registro nao encontrado")
-    result=table_rg(table).update({"published":payload.published}).eq("id",str(item_id)).execute()
+    if payload.published and nivel == "subnichos":
+        row=table_rg("subnichos").select("nicho_id,slug").eq("id",str(item_id)).limit(1).execute().data[0]
+        parent=table_rg("nichos").select("id,slug").eq("id",row["nicho_id"]).eq("published",True).limit(1).execute()
+        if not parent.data or str(row["slug"]).lower().startswith(("teste-","test-")):
+            raise HTTPException(status_code=409, detail="Publique primeiro um nicho valido")
+    if payload.published and nivel == "dores":
+        row=table_rg("dores").select("subnicho_id,slug").eq("id",str(item_id)).limit(1).execute().data[0]
+        sub=table_rg("subnichos").select("nicho_id,slug").eq("id",row["subnicho_id"]).eq("published",True).limit(1).execute()
+        if not sub.data or str(row["slug"]).lower().startswith(("teste-","test-")):
+            raise HTTPException(status_code=409, detail="Publique primeiro um subnicho valido")
+        parent=table_rg("nichos").select("id").eq("id",sub.data[0]["nicho_id"]).eq("published",True).limit(1).execute()
+        if not parent.data:
+            raise HTTPException(status_code=409, detail="Nicho principal nao publicado")
+    if payload.published and nivel == "nichos":
+        row=table_rg("nichos").select("slug").eq("id",str(item_id)).limit(1).execute().data[0]
+        if str(row["slug"]).lower().startswith(("teste-","test-")):
+            raise HTTPException(status_code=409, detail="Registros de teste nao podem ser publicados")
+    table_rg(table).update({"published":payload.published}).eq("id",str(item_id)).execute()
     return {"status":"OK","nivel":nivel,"id":str(item_id),"published":payload.published}
 
 # ==========================================================
