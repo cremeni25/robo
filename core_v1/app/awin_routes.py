@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import os
 from urllib.request import Request, urlopen
+import logging
+from threading import Thread
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -71,7 +73,7 @@ def import_feed(payload: ImportRequest):
             content = response.read(15_000_001)
         if len(content) > 15_000_000:
             raise ValueError("feed exceeds 15 MB limit")
-        offers = parse_feed(content, compressed=content.startswith(b"\\x1f\\x8b"), max_rows=payload.max_rows)
+        offers = parse_feed(content, compressed=content.startswith(bytes([0x1f, 0x8b])), max_rows=payload.max_rows)
         # No inferred approvals: until program/channel terms are separately verified,
         # all imported records remain candidates.
         with connect(os.environ["DATABASE_URL"]) as conn:
@@ -79,3 +81,31 @@ def import_feed(payload: ImportRequest):
         return {**summary.__dict__, "dry_run": payload.dry_run, "publication_enabled": False}
     except Exception:
         raise HTTPException(502, "Awin feed import failed; no credentials or URLs disclosed")
+
+
+def _startup_feed_probe():
+    """One-shot non-mutating feed verification; secrets never logged."""
+    if not os.getenv("AWIN_FEED_URL"):
+        logging.getLogger("robo-global-core").warning("AWIN_PROBE feed_not_configured")
+        return
+    try:
+        url = os.environ["AWIN_FEED_URL"]
+        parsed = urlparse(url)
+        if parsed.scheme != "https" or parsed.hostname not in {"productdata.awin.com", "ui.awin.com"}:
+            raise ValueError("unapproved feed host")
+        req = Request(url, headers={"User-Agent": "RoboGlobalCore/1.0"})
+        with urlopen(req, timeout=45) as response:
+            if urlparse(response.geturl()).hostname not in {"productdata.awin.com", "ui.awin.com"}:
+                raise ValueError("unapproved redirect")
+            content = response.read(15_000_001)
+        if len(content) > 15_000_000:
+            raise ValueError("feed too large")
+        offers = parse_feed(content, compressed=content.startswith(bytes([0x1f, 0x8b])), max_rows=10000)
+        logging.getLogger("robo-global-core").info("AWIN_PROBE success candidates=%s publication_enabled=false database_writes=0", len(offers))
+    except Exception as exc:
+        logging.getLogger("robo-global-core").error("AWIN_PROBE failed category=%s", type(exc).__name__)
+
+
+@router.on_event("startup")
+def awin_startup_probe():
+    Thread(target=_startup_feed_probe, daemon=True).start()
