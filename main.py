@@ -1207,7 +1207,7 @@ def table_rg(nome_tabela: str):
     Helper seguro para acessar tabelas do schema robo_global
     Sem impactar código existente
     """
-    return supabase.schema(SCHEMA_ROBO).table(nome_tabela)
+    return sb.schema(SCHEMA_ROBO).table(nome_tabela)
 
 # ===============================
 # ENDPOINT PUBLICO — NICHOS
