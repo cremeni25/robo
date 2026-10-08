@@ -125,7 +125,7 @@ def _startup_feed_probe():
         if len(content) > 15_000_000:
             raise ValueError("feed too large")
         offers = parse_feed(content, compressed=content.startswith(bytes([0x1f, 0x8b])), max_rows=10000)
-        logging.getLogger("robo-global-core").info("AWIN_PROBE success candidates=%s publication_enabled=false database_writes=0", len(offers))
+        logging.getLogger("robo-global-core").warning("AWIN_PROBE success candidates=%s publication_enabled=false database_writes=0", len(offers))
     except HTTPError as exc:
         category = "unclassified"
         try:
