@@ -2063,31 +2063,4 @@ async def vincular_solucao(payload: dict):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.get("/public2/dores/{nicho_id}")
-async def listar_dores_publicas(nicho_id: str):
-    try:
-        res = supabase.table("dores") \
-            .select("id, descricao") \
-            .eq("nicho_id", nicho_id) \
-            .execute()
-
-        return res.data
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Erro ao buscar dores")
-
-# ============================================
-# NICHOS PUBLICOS OFICIAIS (BASE RELACIONAL)
-# ============================================
-
-@app.get("/public/nichos-oficial")
-async def listar_nichos_oficiais():
-    try:
-        res = supabase.table("nichos") \
-            .select("id, nome") \
-            .execute()
-
-        return res.data
-
-    except Exception:
-        raise HTTPException(status_code=500, detail="Erro ao buscar nichos oficiais")
+# Legacy public catalog routes retired: canonical B1 is served exclusively by /public/nichos and its child routes.
