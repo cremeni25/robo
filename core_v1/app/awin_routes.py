@@ -104,7 +104,7 @@ def _startup_feed_probe():
         offers = parse_feed(content, compressed=content.startswith(bytes([0x1f, 0x8b])), max_rows=10000)
         logging.getLogger("robo-global-core").info("AWIN_PROBE success candidates=%s publication_enabled=false database_writes=0", len(offers))
     except HTTPError as exc:
-        logging.getLogger("robo-global-core").error("AWIN_PROBE failed category=HTTPError status=%s", exc.code)
+        logging.getLogger("robo-global-core").error("AWIN_PROBE failed category=HTTPError status=%s response_type=%s", exc.code, (exc.headers.get("Content-Type", "unknown").split(";")[0] if exc.headers else "unknown"))
     except Exception as exc:
         logging.getLogger("robo-global-core").error("AWIN_PROBE failed category=%s", type(exc).__name__)
 
