@@ -845,6 +845,59 @@ def cms_criar_nicho(payload: NichoCMS, request: Request):
         log("CMS", "ERRO", f"Falha ao criar nicho: {str(e)}")
         raise HTTPException(status_code=500, detail="Erro ao inserir nicho")
 
+# B1 editorial management — private, explicitly authenticated, unpublished by default
+class SubnichoCMS(BaseModel):
+    nicho_id: uuid.UUID
+    title: str
+    slug: str
+    description: Optional[str] = None
+
+class DorCMS(BaseModel):
+    subnicho_id: uuid.UUID
+    title: str
+    slug: str
+    description: Optional[str] = None
+
+@app.post("/cms/subnichos")
+def cms_criar_subnicho(payload: SubnichoCMS, request: Request):
+    validar_master(request)
+    parent = table_rg("nichos").select("id").eq("id", str(payload.nicho_id)).limit(1).execute()
+    if not parent.data:
+        raise HTTPException(status_code=404, detail="Nicho nao encontrado")
+    try:
+        result = table_rg("subnichos").insert({"nicho_id":str(payload.nicho_id),"title":payload.title,"slug":payload.slug,"description":payload.description,"published":False}).execute()
+        return {"status":"OK","data":result.data}
+    except Exception:
+        raise HTTPException(status_code=409, detail="Subnicho nao cadastrado; verifique slug e dados")
+
+@app.post("/cms/dores")
+def cms_criar_dor(payload: DorCMS, request: Request):
+    validar_master(request)
+    parent = table_rg("subnichos").select("id").eq("id", str(payload.subnicho_id)).limit(1).execute()
+    if not parent.data:
+        raise HTTPException(status_code=404, detail="Subnicho nao encontrado")
+    try:
+        result = table_rg("dores").insert({"subnicho_id":str(payload.subnicho_id),"title":payload.title,"slug":payload.slug,"description":payload.description,"published":False}).execute()
+        return {"status":"OK","data":result.data}
+    except Exception:
+        raise HTTPException(status_code=409, detail="Dor nao cadastrada; verifique slug e dados")
+
+class PublicacaoCMS(BaseModel):
+    published: bool
+
+@app.patch("/cms/b1/{nivel}/{item_id}/publicacao")
+def cms_publicar_b1(nivel: str, item_id: uuid.UUID, payload: PublicacaoCMS, request: Request):
+    validar_master(request)
+    tabelas={"nichos":"nichos","subnichos":"subnichos","dores":"dores"}
+    if nivel not in tabelas:
+        raise HTTPException(status_code=404, detail="Nivel desconhecido")
+    table=tabelas[nivel]
+    existing=table_rg(table).select("id").eq("id",str(item_id)).limit(1).execute()
+    if not existing.data:
+        raise HTTPException(status_code=404, detail="Registro nao encontrado")
+    result=table_rg(table).update({"published":payload.published}).eq("id",str(item_id)).execute()
+    return {"status":"OK","nivel":nivel,"id":str(item_id),"published":payload.published}
+
 # ==========================================================
 # CMS — LEITURA SEGURA DE NICHOS (PUBLICO VIA API)
 # ==========================================================
