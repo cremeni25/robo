@@ -58,6 +58,33 @@ def programs():
         raise HTTPException(502, "Awin program discovery unavailable")
 
 
+@router.get("/discovery/summary", dependencies=[Depends(_auth)])
+def discovery_summary():
+    """Read-only advertiser discovery. Active does not imply publisher approval."""
+    from collections import Counter
+    try:
+        client = AwinClient(int(os.environ["AWIN_PUBLISHER_ID"]), os.environ["AWIN_API_TOKEN"])
+        programmes = client.programs()
+        joined = client.programs("joined")
+        if not isinstance(programmes, list) or not isinstance(joined, list):
+            raise ValueError("unexpected programme response")
+        joined_ids = {str(p.get("id")) for p in joined if isinstance(p, dict)}
+        sectors = Counter(str(p.get("primarySector") or "unknown") for p in programmes if isinstance(p, dict))
+        regions = Counter(str(p.get("primaryRegion") or "unknown") for p in programmes if isinstance(p, dict))
+        return {
+            "programmes_discovered": len(programmes),
+            "joined_programmes": len(joined),
+            "catalogue_merchant_id": "81383",
+            "catalogue_merchant_joined": "81383" in joined_ids,
+            "sector_counts": dict(sectors.most_common()),
+            "region_counts": dict(regions.most_common()),
+            "offers_authorized_for_publication": 0,
+            "requires_terms_and_channel_verification": True,
+        }
+    except Exception:
+        raise HTTPException(502, "Awin advertiser discovery unavailable")
+
+
 @router.post("/import", dependencies=[Depends(_auth)])
 def import_feed(payload: ImportRequest):
     url = os.getenv("AWIN_FEED_URL", "")
