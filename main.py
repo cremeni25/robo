@@ -2126,3 +2126,14 @@ async def vincular_solucao(payload: dict):
         raise HTTPException(status_code=400, detail=str(e))
 
 # Legacy public catalog routes retired: canonical B1 is served exclusively by /public/nichos and its child routes.
+
+
+@app.get("/master/catalogo/awin/anunciantes")
+def anunciantes_awin_master(request: Request):
+    validar_master(request)
+    from scripts.awin_discover import discover
+    from urllib.error import HTTPError, URLError
+    try:
+        return discover()
+    except (HTTPError, URLError, TimeoutError, ValueError):
+        raise HTTPException(status_code=503, detail="Consulta Awin indisponivel")
