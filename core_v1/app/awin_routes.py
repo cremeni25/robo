@@ -176,6 +176,11 @@ def check_awin_oauth_at_startup():
             else:
                 raise ValueError("unexpected response")
             logger.warning("AWIN_OAUTH_CHECK success programs=%s", count)
+            try:
+                joined = AwinClient(int(os.environ["AWIN_PUBLISHER_ID"]), os.environ["AWIN_API_TOKEN"]).programs("joined")
+                logger.warning("AWIN_JOINED_DISCOVERY count=%s", len(joined) if isinstance(joined, list) else -1)
+            except HTTPError as err:
+                logger.warning("AWIN_JOINED_DISCOVERY http_status=%s", err.code)
             # Read-only membership breakdown; no offers are approved or published here.
             if isinstance(data, list):
                 from collections import Counter
