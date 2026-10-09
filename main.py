@@ -1248,38 +1248,13 @@ from fastapi.responses import RedirectResponse
 
 @app.get("/go/{gul_id}")
 def redirect_gul(gul_id: str):
-
-    try:
-        # Buscar produto pelo GUL
-        res = sb.table("produtos") \
-            .select("nome, link_afiliado, plataforma, gul") \
-            .like("gul", f"%{gul_id}") \
-            .limit(1) \
-            .execute()
-
-        if not res.data:
-            raise HTTPException(status_code=404, detail="GUL não encontrado")
-
-        produto = res.data[0]
-        destino = produto["link_afiliado"]
-
-        # ======================================================
-        # LOG OPERACIONAL DO CLIQUE
-        # ======================================================
-        sb.table("cliques").insert({
-            "gul": produto["gul"],
-            "produto": produto["nome"],
-            "plataforma": produto["plataforma"],
-            "created_at": utc_now_iso()
-        }).execute()
-
-        log("B2.6", "INFO", f"Redirect GUL -> {destino}")
-
-        return RedirectResponse(destino, status_code=302)
-
-    except Exception as e:
-        log("B2.6", "ERRO", str(e))
-        raise HTTPException(status_code=500, detail="Erro no redirecionamento")
+    """Fail closed: legacy GUL offers are not authorized by the Core V1 catalogue."""
+    # The legacy path relied on public.produtos and a missing cliques table.
+    # It must not redirect unverified affiliate links or claim tracking.
+    raise HTTPException(
+        status_code=503,
+        detail="GUL legado indisponivel ate integracao de elegibilidade e rastreamento do Core V1",
+    )
 
 # ===============================
 # SCHEMA FIX — ROBO GLOBAL
