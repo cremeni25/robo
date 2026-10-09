@@ -1290,6 +1290,40 @@ def listar_nichos_publicos():
         log("PUBLIC", "ERRO", "Falha ao buscar nichos publicos")
         raise HTTPException(status_code=503, detail="Catalogo temporariamente indisponivel")
 
+# Read-only bridge to the canonical Core V1 commercial catalog.
+# Only Core V1 can authorize and track affiliate redirects.
+@app.get("/public/ofertas")
+def listar_ofertas_core():
+    import json as _json
+    import urllib.request as _request
+    import urllib.error as _error
+    try:
+        req = _request.Request(
+            "https://robo-global-core-v1.onrender.com/v1/public/catalog",
+            headers={"Accept": "application/json"},
+        )
+        with _request.urlopen(req, timeout=8) as response:
+            payload = _json.load(response)
+        if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+            raise ValueError("invalid core catalog")
+        items = []
+        for item in payload["data"]:
+            try:
+                opportunity_id = uuid.UUID(str(item["id"]))
+            except (KeyError, ValueError, TypeError, AttributeError):
+                continue
+            items.append({
+                "id": str(opportunity_id),
+                "title": str(item.get("title") or ""),
+                "market": item.get("market"),
+                "language": item.get("language"),
+                "url": f"/go/{opportunity_id}",
+            })
+        return {"status": "OK", "total": len(items), "data": items}
+    except (_error.URLError, TimeoutError, ValueError, OSError):
+        raise HTTPException(status_code=503, detail="Catalogo Core V1 temporariamente indisponivel")
+
+
 # B1 — hierarchical public catalog (only approved records; test slugs excluded)
 @app.get("/public/nichos/{nicho_slug}/subnichos")
 def listar_subnichos_publicos(nicho_slug: str):
