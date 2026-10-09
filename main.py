@@ -1251,38 +1251,44 @@ from fastapi.responses import RedirectResponse
 
 @app.get("/go/{gul_id}")
 def redirect_gul(gul_id: str):
+    from urllib.parse import urlsplit
+
+    if not gul_id or len(gul_id) > 80 or not all(ch.isalnum() or ch == "-" for ch in gul_id):
+        raise HTTPException(status_code=404, detail="GUL não encontrado")
 
     try:
-        # Buscar produto pelo GUL
-        res = sb.table("produtos") \
-            .select("nome, link_afiliado, plataforma, gul") \
-            .like("gul", f"%{gul_id}") \
-            .limit(1) \
+        result = (
+            sb.table("produtos")
+            .select("nome,link_afiliado,plataforma,gul,status")
+            .eq("gul", "/go/" + gul_id)
+            .limit(1)
             .execute()
+        )
+    except Exception:
+        log("B2.6", "ERRO", "Consulta comercial indisponível")
+        raise HTTPException(status_code=503, detail="Encaminhamento indisponível")
 
-        if not res.data:
-            raise HTTPException(status_code=404, detail="GUL não encontrado")
+    if not result.data or result.data[0].get("status") != "ativo":
+        raise HTTPException(status_code=404, detail="Oferta não encontrada ou inativa")
 
-        produto = res.data[0]
-        destino = produto["link_afiliado"]
+    produto = result.data[0]
+    destino = str(produto.get("link_afiliado") or "").strip()
+    url = urlsplit(destino)
+    if url.scheme != "https" or not url.hostname or url.username or url.password:
+        raise HTTPException(status_code=503, detail="Destino comercial indisponível")
 
-        # ======================================================
-        # LOG OPERACIONAL DO CLIQUE
-        # ======================================================
+    try:
         sb.table("cliques").insert({
             "gul": produto["gul"],
             "produto": produto["nome"],
             "plataforma": produto["plataforma"],
             "created_at": utc_now_iso()
         }).execute()
+    except Exception:
+        log("B2.6", "WARN", "Registro agregado de clique indisponível")
 
-        log("B2.6", "INFO", f"Redirect GUL -> {destino}")
+    return RedirectResponse(destino, status_code=302)
 
-        return RedirectResponse(destino, status_code=302)
-
-    except Exception as e:
-        log("B2.6", "ERRO", str(e))
-        raise HTTPException(status_code=500, detail="Erro no redirecionamento")
 
 # ===============================
 # SCHEMA FIX — ROBO GLOBAL
