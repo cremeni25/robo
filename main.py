@@ -1055,7 +1055,8 @@ if "produtos_cadastrados" not in globals():
     produtos_cadastrados = []
 
 @app.post("/master/produto")
-async def cadastrar_produto(produto: ProdutoInput):
+async def cadastrar_produto(produto: ProdutoInput, request: Request):
+    validar_master(request)
     novo = {
         "id": len(produtos_cadastrados) + 1,
         "nome": produto.nome,
@@ -1069,7 +1070,8 @@ async def cadastrar_produto(produto: ProdutoInput):
     return {"ok": True, "produto": novo}
 
 @app.get("/master/produtos")
-async def listar_produtos_master():
+async def listar_produtos_master(request: Request):
+    validar_master(request)
     return produtos_cadastrados
 
 # ==========================================================
