@@ -2014,29 +2014,8 @@ async def recomendar_solucao(dor_id: str):
 # ENDPOINT DE REDIRECIONAMENTO REAL
 # =========================================================
 
-@app.get("/go/{go_id}")
-async def redirecionar(go_id: str):
-    try:
-        res = supabase.table("go_tracking") \
-            .select("*") \
-            .eq("id", go_id) \
-            .single() \
-            .execute()
-
-        if not res.data:
-            raise HTTPException(status_code=404, detail="Link inválido")
-
-        destino = res.data["link_destino"]
-
-        # Registrar clique executado
-        supabase.table("go_tracking").update({
-            "clicado": True
-        }).eq("id", go_id).execute()
-
-        return RedirectResponse(destino)
-
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+# Legacy /go/{go_id} route removed: it bypassed canonical eligibility gates.
+# All commercial redirects must use /go/offer/{offer_id}.
 
 # =========================================================
 # FASE 10 — REGISTRO AUTOMÁTICO DE DECISÕES
