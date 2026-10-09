@@ -154,3 +154,10 @@ def _startup_feed_probe():
 @router.on_event("startup")
 def awin_startup_probe():
     Thread(target=_startup_feed_probe, daemon=True).start()
+
+
+@router.get('/health/programs', dependencies=[Depends(_auth)])
+def programs_health():
+    response = programs()
+    records = response.get('programs', [])
+    return {'reachable': True, 'count': len(records)}
