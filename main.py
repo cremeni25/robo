@@ -2135,6 +2135,62 @@ async def vincular_solucao(payload: dict):
 # Legacy public catalog routes retired: canonical B1 is served exclusively by /public/nichos and its child routes.
 
 
+# Read-only public commercial endpoint. It returns only offers with a
+# published canonical opportunity matching a published B1 pain.
+@app.get("/public/dores/{dor_id}/ofertas")
+def ofertas_canonicas_da_dor(dor_id: uuid.UUID):
+    try:
+        pain = table_rg("dores").select("id,subnicho_id,slug").eq("id", str(dor_id)).eq("published", True).limit(1).execute()
+        if not pain.data or str(pain.data[0]["slug"]).lower().startswith(("teste-", "test-")):
+            raise HTTPException(status_code=404, detail="Necessidade indisponivel")
+        sub = table_rg("subnichos").select("id,nicho_id,slug").eq("id", pain.data[0]["subnicho_id"]).eq("published", True).limit(1).execute()
+        if not sub.data:
+            raise HTTPException(status_code=404, detail="Necessidade indisponivel")
+        parent = table_rg("nichos").select("id,slug").eq("id", sub.data[0]["nicho_id"]).eq("published", True).limit(1).execute()
+        if not parent.data:
+            raise HTTPException(status_code=404, detail="Necessidade indisponivel")
+
+        # The opportunity must explicitly reference the pain UUID in its angle
+        # as an exact canonical identifier, not a fuzzy keyword match.
+        matches = (
+            sb.schema("robo_global_core").table("opportunities")
+            .select("offer_id,angle")
+            .eq("status", "published")
+            .eq("angle", "b1_pain:" + str(dor_id))
+            .limit(50)
+            .execute()
+        )
+        offer_ids = list({str(row["offer_id"]) for row in (matches.data or []) if row.get("offer_id")})
+        if not offer_ids:
+            return {"status": "OK", "total": 0, "data": []}
+
+        approved = (
+            sb.schema("robo_global_core").table("offers")
+            .select("id,name,status,evidence")
+            .in_("id", offer_ids)
+            .eq("status", "published")
+            .execute()
+        )
+        items = []
+        for offer in approved.data or []:
+            evidence = offer.get("evidence") or {}
+            if not isinstance(evidence, dict):
+                continue
+            if evidence.get("terms_reviewed") is not True or evidence.get("membership_status") != "approved":
+                continue
+            items.append({
+                "id": str(offer["id"]),
+                "title": offer["name"],
+                "url": "https://api.roboglobal.com.br/go/offer/" + str(offer["id"])
+            })
+        return {"status": "OK", "total": len(items), "data": items}
+    except HTTPException:
+        raise
+    except Exception:
+        log("PUBLIC", "ERRO", "Falha na consulta de ofertas canonicas")
+        raise HTTPException(status_code=503, detail="Ofertas temporariamente indisponiveis")
+
+
 # Canonical offer redirect. Never redirect candidate or unverified offers.
 @app.get("/go/offer/{offer_id}")
 def redirect_canonical_offer(offer_id: uuid.UUID):
