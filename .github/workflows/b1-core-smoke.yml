@@ -1,0 +1,16 @@
+name: ROBÔ GLOBAL B1 Core Smoke
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/b1-core-smoke.yml'
+      - 'scripts/smoke_b1_core.py'
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check live public API and canonical Core
+        run: python scripts/smoke_b1_core.py
