@@ -129,6 +129,29 @@ def discovery_shortlist(region: str = "BR", limit: int = 30):
         raise HTTPException(502, "Awin shortlist unavailable")
 
 
+@router.get("/discovery/regions", dependencies=[Depends(_auth)])
+def discovery_regions():
+    """Global coverage inventory; programme presence is not commercial eligibility."""
+    from collections import Counter
+    try:
+        programmes = AwinClient(int(os.environ["AWIN_PUBLISHER_ID"]), os.environ["AWIN_API_TOKEN"]).programs()
+        if not isinstance(programmes, list):
+            raise ValueError("unexpected response")
+        counts = Counter()
+        for programme in programmes:
+            if not isinstance(programme, dict):
+                continue
+            primary = programme.get("primaryRegion")
+            if isinstance(primary, dict):
+                label = str(primary.get("countryCode") or primary.get("code") or primary.get("name") or "unknown")
+            else:
+                label = str(primary or "unknown")
+            counts[label] += 1
+        return {"total_programmes": len(programmes), "regions": [{"region": k, "programmes": v} for k, v in sorted(counts.items())], "publication_enabled": False}
+    except Exception:
+        raise HTTPException(502, "Awin regional inventory unavailable")
+
+
 @router.post("/import", dependencies=[Depends(_auth)])
 def import_feed(payload: ImportRequest):
     url = os.getenv("AWIN_FEED_URL", "")
