@@ -2247,3 +2247,9 @@ def resumo_catalogo_awin(request: Request):
     except Exception:
         log("CATALOGO", "ERRO", "Falha ao consultar inventario AWIN")
         raise HTTPException(status_code=503, detail="Inventario comercial indisponivel")
+
+@app.get("/master/catalogo/awin/anunciantes")
+def anunciantes_awin_master(request: Request):
+    validar_master(request)
+    from scripts.awin_discover import discover
+    return discover()
