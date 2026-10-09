@@ -161,3 +161,23 @@ def programs_health():
     response = programs()
     records = response.get('programs', [])
     return {'reachable': True, 'count': len(records)}
+
+
+@router.on_event("startup")
+def check_awin_oauth_at_startup():
+    def check():
+        logger = logging.getLogger("robo-global-core")
+        try:
+            data = AwinClient(int(os.environ["AWIN_PUBLISHER_ID"]), os.environ["AWIN_API_TOKEN"]).programs()
+            if isinstance(data, list):
+                count = len(data)
+            elif isinstance(data, dict):
+                count = len(data.get("programmes", data.get("data", [])))
+            else:
+                raise ValueError("unexpected response")
+            logger.warning("AWIN_OAUTH_CHECK success programs=%s", count)
+        except HTTPError as exc:
+            logger.error("AWIN_OAUTH_CHECK http_status=%s", exc.code)
+        except Exception as exc:
+            logger.error("AWIN_OAUTH_CHECK error_type=%s", type(exc).__name__)
+    Thread(target=check, daemon=True).start()
