@@ -1250,11 +1250,15 @@ from fastapi.responses import RedirectResponse
 @app.get("/go/{gul_id}")
 def redirect_gul(gul_id: str):
     """Fail closed: legacy GUL offers are not authorized by the Core V1 catalogue."""
-    # The legacy path relied on public.produtos and a missing cliques table.
-    # It must not redirect unverified affiliate links or claim tracking.
-    raise HTTPException(
-        status_code=503,
-        detail="GUL legado indisponivel ate integracao de elegibilidade e rastreamento do Core V1",
+    # UUIDs are canonical Core V1 opportunity IDs, not legacy product identifiers.
+    # Core V1 alone checks commercial eligibility and records the interaction.
+    try:
+        opportunity_id = uuid.UUID(gul_id)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=503, detail="GUL legado indisponivel; somente oportunidades Core V1 validadas")
+    return RedirectResponse(
+        url=f"https://robo-global-core-v1.onrender.com/r/{opportunity_id}",
+        status_code=307,
     )
 
 # ===============================
