@@ -1055,7 +1055,8 @@ if "produtos_cadastrados" not in globals():
     produtos_cadastrados = []
 
 @app.post("/master/produto")
-async def cadastrar_produto(produto: ProdutoInput):
+async def cadastrar_produto(produto: ProdutoInput, request: Request):
+    validar_master(request)
     novo = {
         "id": len(produtos_cadastrados) + 1,
         "nome": produto.nome,
@@ -1069,7 +1070,8 @@ async def cadastrar_produto(produto: ProdutoInput):
     return {"ok": True, "produto": novo}
 
 @app.get("/master/produtos")
-async def listar_produtos_master():
+async def listar_produtos_master(request: Request):
+    validar_master(request)
     return produtos_cadastrados
 
 # ==========================================================
@@ -1202,7 +1204,8 @@ class ProdutoMaster(BaseModel):
 
 
 @app.post("/master/produto")
-def master_cadastrar_produto(payload: ProdutoMaster):
+def master_cadastrar_produto(payload: ProdutoMaster, request: Request):
+    validar_master(request)
 
     try:
         gul = gerar_gul(
@@ -1248,38 +1251,44 @@ from fastapi.responses import RedirectResponse
 
 @app.get("/go/{gul_id}")
 def redirect_gul(gul_id: str):
+    from urllib.parse import urlsplit
+
+    if not gul_id or len(gul_id) > 80 or not all(ch.isalnum() or ch == "-" for ch in gul_id):
+        raise HTTPException(status_code=404, detail="GUL não encontrado")
 
     try:
-        # Buscar produto pelo GUL
-        res = sb.table("produtos") \
-            .select("nome, link_afiliado, plataforma, gul") \
-            .like("gul", f"%{gul_id}") \
-            .limit(1) \
+        result = (
+            sb.table("produtos")
+            .select("nome,link_afiliado,plataforma,gul,status")
+            .eq("gul", "/go/" + gul_id)
+            .limit(1)
             .execute()
+        )
+    except Exception:
+        log("B2.6", "ERRO", "Consulta comercial indisponível")
+        raise HTTPException(status_code=503, detail="Encaminhamento indisponível")
 
-        if not res.data:
-            raise HTTPException(status_code=404, detail="GUL não encontrado")
+    if not result.data or result.data[0].get("status") != "ativo":
+        raise HTTPException(status_code=404, detail="Oferta não encontrada ou inativa")
 
-        produto = res.data[0]
-        destino = produto["link_afiliado"]
+    produto = result.data[0]
+    destino = str(produto.get("link_afiliado") or "").strip()
+    url = urlsplit(destino)
+    if url.scheme != "https" or not url.hostname or url.username or url.password:
+        raise HTTPException(status_code=503, detail="Destino comercial indisponível")
 
-        # ======================================================
-        # LOG OPERACIONAL DO CLIQUE
-        # ======================================================
+    try:
         sb.table("cliques").insert({
             "gul": produto["gul"],
             "produto": produto["nome"],
             "plataforma": produto["plataforma"],
             "created_at": utc_now_iso()
         }).execute()
+    except Exception:
+        log("B2.6", "WARN", "Registro agregado de clique indisponível")
 
-        log("B2.6", "INFO", f"Redirect GUL -> {destino}")
+    return RedirectResponse(destino, status_code=302)
 
-        return RedirectResponse(destino, status_code=302)
-
-    except Exception as e:
-        log("B2.6", "ERRO", str(e))
-        raise HTTPException(status_code=500, detail="Erro no redirecionamento")
 
 # ===============================
 # SCHEMA FIX — ROBO GLOBAL
@@ -1348,6 +1357,8 @@ def listar_dores_subnicho_publicas(subnicho_id: uuid.UUID):
 # This is a read-only catalog endpoint; no click tracking or personal data.
 @app.get("/public/dores/{dor_id}/solucoes")
 def listar_solucoes_publicas_dor(dor_id: uuid.UUID):
+    # The legacy pain/solution mapping is not the canonical commercial catalog.
+    # Never publish legacy affiliate URLs or candidate offers.
     try:
         pain = table_rg("dores").select("id,subnicho_id,slug").eq("id", str(dor_id)).eq("published", True).limit(1).execute()
         if not pain.data or str(pain.data[0]["slug"]).lower().startswith(("teste-", "test-")):
@@ -1358,18 +1369,14 @@ def listar_solucoes_publicas_dor(dor_id: uuid.UUID):
         parent = table_rg("nichos").select("id,slug").eq("id", sub.data[0]["nicho_id"]).eq("published", True).limit(1).execute()
         if not parent.data or str(parent.data[0]["slug"]).lower().startswith(("teste-", "test-")):
             raise HTTPException(status_code=404, detail="Nicho nao encontrado")
-        links = table_rg("dor_solucoes").select("solucao_id,prioridade").eq("dor_id", str(dor_id)).eq("published", True).order("prioridade", desc=True).execute()
-        ids = [x["solucao_id"] for x in (links.data or [])]
-        if not ids:
-            return {"status": "OK", "total": 0, "data": []}
-        products = sb.table("solucoes").select("id,nome,descricao,link_afiliado,ativo").in_("id", ids).eq("ativo", True).execute()
-        lookup = {str(x["id"]): x for x in (products.data or [])}
-        items = [{"id": str(k), "title": lookup[str(k)]["nome"], "description": lookup[str(k)].get("descricao") or "", "url": lookup[str(k)]["link_afiliado"]} for k in ids if str(k) in lookup and str(lookup[str(k)].get("link_afiliado") or "").startswith(("https://", "http://"))]
-        return {"status": "OK", "total": len(items), "data": items}
+
+        # No canonical opportunity/pain linkage is approved yet.
+        # Return an honest empty result rather than a direct affiliate URL.
+        return {"status": "OK", "total": 0, "data": []}
     except HTTPException:
         raise
     except Exception:
-        log("PUBLIC", "ERRO", "Falha ao consultar solucoes da dor")
+        log("PUBLIC", "ERRO", "Falha ao consultar catalogo publico")
         raise HTTPException(status_code=503, detail="Solucoes temporariamente indisponiveis")
 
 # ================================
@@ -2007,29 +2014,8 @@ async def recomendar_solucao(dor_id: str):
 # ENDPOINT DE REDIRECIONAMENTO REAL
 # =========================================================
 
-@app.get("/go/{go_id}")
-async def redirecionar(go_id: str):
-    try:
-        res = supabase.table("go_tracking") \
-            .select("*") \
-            .eq("id", go_id) \
-            .single() \
-            .execute()
-
-        if not res.data:
-            raise HTTPException(status_code=404, detail="Link inválido")
-
-        destino = res.data["link_destino"]
-
-        # Registrar clique executado
-        supabase.table("go_tracking").update({
-            "clicado": True
-        }).eq("id", go_id).execute()
-
-        return RedirectResponse(destino)
-
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+# Legacy /go/{go_id} route removed: it bypassed canonical eligibility gates.
+# All commercial redirects must use /go/offer/{offer_id}.
 
 # =========================================================
 # FASE 10 — REGISTRO AUTOMÁTICO DE DECISÕES
@@ -2126,3 +2112,144 @@ async def vincular_solucao(payload: dict):
         raise HTTPException(status_code=400, detail=str(e))
 
 # Legacy public catalog routes retired: canonical B1 is served exclusively by /public/nichos and its child routes.
+
+
+# Read-only public commercial endpoint. It returns only offers with a
+# published canonical opportunity matching a published B1 pain.
+@app.get("/public/dores/{dor_id}/ofertas")
+def ofertas_canonicas_da_dor(dor_id: uuid.UUID):
+    try:
+        pain = table_rg("dores").select("id,subnicho_id,slug").eq("id", str(dor_id)).eq("published", True).limit(1).execute()
+        if not pain.data or str(pain.data[0]["slug"]).lower().startswith(("teste-", "test-")):
+            raise HTTPException(status_code=404, detail="Necessidade indisponivel")
+        sub = table_rg("subnichos").select("id,nicho_id,slug").eq("id", pain.data[0]["subnicho_id"]).eq("published", True).limit(1).execute()
+        if not sub.data:
+            raise HTTPException(status_code=404, detail="Necessidade indisponivel")
+        parent = table_rg("nichos").select("id,slug").eq("id", sub.data[0]["nicho_id"]).eq("published", True).limit(1).execute()
+        if not parent.data:
+            raise HTTPException(status_code=404, detail="Necessidade indisponivel")
+
+        # The opportunity must explicitly reference the pain UUID in its angle
+        # as an exact canonical identifier, not a fuzzy keyword match.
+        matches = (
+            sb.schema("robo_global_core").table("opportunities")
+            .select("offer_id,angle")
+            .eq("status", "published")
+            .eq("angle", "b1_pain:" + str(dor_id))
+            .limit(50)
+            .execute()
+        )
+        offer_ids = list({str(row["offer_id"]) for row in (matches.data or []) if row.get("offer_id")})
+        if not offer_ids:
+            return {"status": "OK", "total": 0, "data": []}
+
+        approved = (
+            sb.schema("robo_global_core").table("offers")
+            .select("id,name,status,evidence")
+            .in_("id", offer_ids)
+            .eq("status", "published")
+            .execute()
+        )
+        items = []
+        for offer in approved.data or []:
+            evidence = offer.get("evidence") or {}
+            if not isinstance(evidence, dict):
+                continue
+            if evidence.get("terms_reviewed") is not True or evidence.get("membership_status") != "approved":
+                continue
+            items.append({
+                "id": str(offer["id"]),
+                "title": offer["name"],
+                "url": "https://api.roboglobal.com.br/go/offer/" + str(offer["id"])
+            })
+        return {"status": "OK", "total": len(items), "data": items}
+    except HTTPException:
+        raise
+    except Exception:
+        log("PUBLIC", "ERRO", "Falha na consulta de ofertas canonicas")
+        raise HTTPException(status_code=503, detail="Ofertas temporariamente indisponiveis")
+
+
+# Canonical offer redirect. Never redirect candidate or unverified offers.
+@app.get("/go/offer/{offer_id}")
+def redirect_canonical_offer(offer_id: uuid.UUID):
+    from urllib.parse import urlsplit
+
+    try:
+        result = (
+            sb.schema("robo_global_core").table("offers")
+            .select("id,affiliate_url,status,evidence,platform")
+            .eq("id", str(offer_id))
+            .eq("status", "published")
+            .limit(1)
+            .execute()
+        )
+    except Exception:
+        log("GO", "ERRO", "Falha na consulta do catalogo canonico")
+        raise HTTPException(status_code=503, detail="Encaminhamento indisponivel")
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Oferta indisponivel")
+
+    offer = result.data[0]
+    evidence = offer.get("evidence") or {}
+    if not isinstance(evidence, dict):
+        raise HTTPException(status_code=404, detail="Oferta indisponivel")
+    if evidence.get("terms_reviewed") is not True or evidence.get("membership_status") != "approved":
+        raise HTTPException(status_code=404, detail="Oferta nao validada")
+
+    target = str(offer.get("affiliate_url") or "").strip()
+    parsed = urlsplit(target)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        raise HTTPException(status_code=503, detail="Destino invalido")
+
+    # No visitor identifiers are recorded. Financial attribution is handled
+    # by the producer's affiliate platform, not by public visitor profiling.
+    return RedirectResponse(target, status_code=302)
+
+
+# Canonical affiliate inventory: private, read-only review for Master.
+# Candidate offers are never published through this endpoint.
+# Operational integrity check: never treats the legacy public.products table as a GUL catalog.
+@app.get("/master/catalogo/integridade")
+def integridade_catalogo_master(request: Request):
+    validar_master(request)
+    return {
+        "status": "blocked_pending_integration",
+        "public_catalog": "robo_global",
+        "canonical_offers": "robo_global_core.offers",
+        "legacy_products": "public.produtos",
+        "issues": [
+            "public.produtos does not provide gul, affiliate_url or status fields required by the legacy redirect",
+            "public.solucoes is not linked to canonical robo_global_core.offers",
+            "canonical offers must be eligible and approved before any public redirect"
+        ],
+        "public_redirects_enabled": False
+    }
+
+
+@app.get("/master/catalogo/awin/resumo")
+def resumo_catalogo_awin(request: Request):
+    validar_master(request)
+    try:
+        query = sb.schema("robo_global_core").table("offers")
+        total = query.select("id", count="exact", head=True).eq("platform", "AWIN").execute().count or 0
+        candidates = query.select("id", count="exact", head=True).eq("platform", "AWIN").eq("status", "candidate").execute().count or 0
+        approved = query.select("id", count="exact", head=True).eq("platform", "AWIN").in_("status", ["approved", "published"]).execute().count or 0
+        return {
+            "platform": "AWIN",
+            "total": total,
+            "candidates": candidates,
+            "approved_or_published": approved,
+            "ready_for_publication": False,  # Requires independent terms, membership and link verification.
+            "policy": "Candidatas nao sao publicadas; autorizacao comercial deve ser comprovada."
+        }
+    except Exception:
+        log("CATALOGO", "ERRO", "Falha ao consultar inventario AWIN")
+        raise HTTPException(status_code=503, detail="Inventario comercial indisponivel")
+
+@app.get("/master/catalogo/awin/anunciantes")
+def anunciantes_awin_master(request: Request):
+    validar_master(request)
+    from scripts.awin_discover import discover
+    return discover()
