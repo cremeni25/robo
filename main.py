@@ -2137,6 +2137,44 @@ async def vincular_solucao(payload: dict):
 # Legacy public catalog routes retired: canonical B1 is served exclusively by /public/nichos and its child routes.
 
 
+# Canonical offer redirect. Never redirect candidate or unverified offers.
+@app.get("/go/offer/{offer_id}")
+def redirect_canonical_offer(offer_id: uuid.UUID):
+    from urllib.parse import urlsplit
+
+    try:
+        result = (
+            sb.schema("robo_global_core").table("offers")
+            .select("id,affiliate_url,status,evidence,platform")
+            .eq("id", str(offer_id))
+            .eq("status", "published")
+            .limit(1)
+            .execute()
+        )
+    except Exception:
+        log("GO", "ERRO", "Falha na consulta do catalogo canonico")
+        raise HTTPException(status_code=503, detail="Encaminhamento indisponivel")
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Oferta indisponivel")
+
+    offer = result.data[0]
+    evidence = offer.get("evidence") or {}
+    if not isinstance(evidence, dict):
+        raise HTTPException(status_code=404, detail="Oferta indisponivel")
+    if evidence.get("terms_reviewed") is not True or evidence.get("membership_status") != "approved":
+        raise HTTPException(status_code=404, detail="Oferta nao validada")
+
+    target = str(offer.get("affiliate_url") or "").strip()
+    parsed = urlsplit(target)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        raise HTTPException(status_code=503, detail="Destino invalido")
+
+    # No visitor identifiers are recorded. Financial attribution is handled
+    # by the producer's affiliate platform, not by public visitor profiling.
+    return RedirectResponse(target, status_code=302)
+
+
 # Canonical affiliate inventory: private, read-only review for Master.
 # Candidate offers are never published through this endpoint.
 # Operational integrity check: never treats the legacy public.products table as a GUL catalog.
