@@ -179,5 +179,5 @@ def check_awin_oauth_at_startup():
         except HTTPError as exc:
             logger.error("AWIN_OAUTH_CHECK http_status=%s", exc.code)
         except Exception as exc:
-            logger.error("AWIN_OAUTH_CHECK error_type=%s", type(exc).__name__)
+            logger.error("AWIN_OAUTH_CHECK error_type=%s configuration_flags=%s", type(exc).__name__, [bool(os.getenv("AWIN_PUBLISHER_ID")), bool(os.getenv("AWIN_API_TOKEN"))])
     Thread(target=check, daemon=True).start()
