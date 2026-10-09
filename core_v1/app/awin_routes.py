@@ -179,6 +179,7 @@ def check_awin_oauth_at_startup():
             try:
                 joined = AwinClient(int(os.environ["AWIN_PUBLISHER_ID"]), os.environ["AWIN_API_TOKEN"]).programs("joined")
                 logger.warning("AWIN_JOINED_DISCOVERY count=%s", len(joined) if isinstance(joined, list) else -1)
+                logger.warning("AWIN_CATALOG_MERCHANT_MATCH merchant_id=81383 joined=%s", any(str(p.get("id")) == "81383" for p in joined if isinstance(p, dict)) if isinstance(joined, list) else False)
             except HTTPError as err:
                 logger.warning("AWIN_JOINED_DISCOVERY http_status=%s", err.code)
             # Read-only membership breakdown; no offers are approved or published here.
