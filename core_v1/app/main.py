@@ -480,7 +480,12 @@ def redirect_opportunity(opportunity_id: UUID, request: Request):
         with conn.cursor() as cur:
             cur.execute(f"""select o.id opportunity_id,o.offer_id,f.affiliate_url,f.tracking_strategy,f.tracking_template
             from {settings.core_schema}.opportunities o join {settings.core_schema}.offers f on f.id=o.offer_id
-            where o.id=%s and o.status in ('testing','winner') and f.status='active'""",(opportunity_id,))
+            where o.id=%s and o.status in ('testing','winner') and f.status='active'
+              and (f.platform <> 'AWIN' or (
+                f.evidence->>'membership_status' = 'joined'
+                and lower(coalesce(f.evidence->>'terms_reviewed','false')) = 'true'
+                and f.evidence->>'eligibility' = 'approved'
+              ))""",(opportunity_id,))
             row=cur.fetchone()
             if not row: raise HTTPException(status_code=404,detail="opportunity not commercially active")
             destination=tracked_url(row["affiliate_url"],row["tracking_strategy"],row["tracking_template"],attribution_key)
