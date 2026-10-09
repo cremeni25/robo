@@ -2007,29 +2007,8 @@ async def recomendar_solucao(dor_id: str):
 # ENDPOINT DE REDIRECIONAMENTO REAL
 # =========================================================
 
-@app.get("/go/{go_id}")
-async def redirecionar(go_id: str):
-    try:
-        res = supabase.table("go_tracking") \
-            .select("*") \
-            .eq("id", go_id) \
-            .single() \
-            .execute()
-
-        if not res.data:
-            raise HTTPException(status_code=404, detail="Link inválido")
-
-        destino = res.data["link_destino"]
-
-        # Registrar clique executado
-        supabase.table("go_tracking").update({
-            "clicado": True
-        }).eq("id", go_id).execute()
-
-        return RedirectResponse(destino)
-
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+# Duplicate legacy /go/{go_id} handler retired: /go/{gul_id} is the single active public GUL route.
+# Original implementation used go_tracking and was shadowed by the earlier registered route.
 
 # =========================================================
 # FASE 10 — REGISTRO AUTOMÁTICO DE DECISÕES
