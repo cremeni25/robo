@@ -89,6 +89,45 @@ def discovery_summary():
         raise HTTPException(502, "Awin advertiser discovery unavailable")
 
 
+@router.get("/discovery/shortlist", dependencies=[Depends(_auth)])
+def discovery_shortlist(region: str = "BR", limit: int = 30):
+    """Read-only candidates for commercial review, never a claim of eligibility."""
+    if len(region) != 2 or not region.isalpha():
+        raise HTTPException(422, "region must be two letters")
+    if limit < 1 or limit > 100:
+        raise HTTPException(422, "limit must be between 1 and 100")
+    try:
+        client = AwinClient(int(os.environ["AWIN_PUBLISHER_ID"]), os.environ["AWIN_API_TOKEN"])
+        programmes = client.programs()
+        joined = client.programs("joined")
+        if not isinstance(programmes, list) or not isinstance(joined, list):
+            raise ValueError("unexpected response")
+        joined_ids = {str(p.get("id")) for p in joined if isinstance(p, dict)}
+        region = region.upper()
+        matches = []
+        for p in programmes:
+            if not isinstance(p, dict):
+                continue
+            primary = p.get("primaryRegion")
+            code = primary.get("countryCode", "") if isinstance(primary, dict) else str(primary or "")
+            if code.upper() != region:
+                continue
+            matches.append({
+                "id": p.get("id"),
+                "name": p.get("name"),
+                "sector": p.get("primarySector"),
+                "region": primary,
+                "programme_active": str(p.get("status", "")).lower() == "active",
+                "publisher_joined": str(p.get("id")) in joined_ids,
+                "terms_reviewed": False,
+                "publication_authorized": False,
+            })
+        matches.sort(key=lambda p: str(p.get("name") or "").casefold())
+        return {"region": region, "matching_programmes": len(matches), "returned": min(len(matches), limit), "candidates": matches[:limit], "publication_enabled": False}
+    except Exception:
+        raise HTTPException(502, "Awin shortlist unavailable")
+
+
 @router.post("/import", dependencies=[Depends(_auth)])
 def import_feed(payload: ImportRequest):
     url = os.getenv("AWIN_FEED_URL", "")
