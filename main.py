@@ -2139,6 +2139,24 @@ async def vincular_solucao(payload: dict):
 
 # Canonical affiliate inventory: private, read-only review for Master.
 # Candidate offers are never published through this endpoint.
+# Operational integrity check: never treats the legacy public.products table as a GUL catalog.
+@app.get("/master/catalogo/integridade")
+def integridade_catalogo_master(request: Request):
+    validar_master(request)
+    return {
+        "status": "blocked_pending_integration",
+        "public_catalog": "robo_global",
+        "canonical_offers": "robo_global_core.offers",
+        "legacy_products": "public.produtos",
+        "issues": [
+            "public.produtos does not provide gul, affiliate_url or status fields required by the legacy redirect",
+            "public.solucoes is not linked to canonical robo_global_core.offers",
+            "canonical offers must be eligible and approved before any public redirect"
+        ],
+        "public_redirects_enabled": False
+    }
+
+
 @app.get("/master/catalogo/awin/resumo")
 def resumo_catalogo_awin(request: Request):
     validar_master(request)
