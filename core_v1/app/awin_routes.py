@@ -281,6 +281,9 @@ def check_awin_oauth_at_startup():
                 from collections import Counter
                 statuses = Counter(str(p.get("relationship", p.get("membershipStatus", p.get("membership_status", p.get("status", "unknown"))))).lower() for p in data if isinstance(p, dict))
                 logger.warning("AWIN_MEMBERSHIP_DISCOVERY total=%s statuses=%s keys=%s", count, dict(statuses.most_common(12)), sorted(data[0].keys()) if data and isinstance(data[0], dict) else [])
+                regions = Counter(str(p.get("primaryRegion") or "unknown") for p in data if isinstance(p, dict))
+                br = sum(n for name, n in regions.items() if name.strip().upper() in {"BR", "BRA", "BRAZIL", "BRASIL"})
+                logger.warning("AWIN_GLOBAL_COVERAGE programmes=%s distinct_regions=%s brazil_programmes=%s top_regions=%s catalogue_merchant_discoverable=%s", count, len(regions), br, dict(regions.most_common(8)), any(str(p.get("id")) == "81383" for p in data if isinstance(p, dict)))
         except HTTPError as exc:
             logger.error("AWIN_OAUTH_CHECK http_status=%s", exc.code)
         except Exception as exc:
