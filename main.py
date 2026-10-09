@@ -1376,10 +1376,10 @@ def listar_solucoes_publicas_dor(dor_id: uuid.UUID):
         ids = [x["solucao_id"] for x in (links.data or [])]
         if not ids:
             return {"status": "OK", "total": 0, "data": []}
-        products = sb.table("solucoes").select("id,nome,descricao,link_afiliado,ativo").in_("id", ids).eq("ativo", True).execute()
-        lookup = {str(x["id"]): x for x in (products.data or [])}
-        items = [{"id": str(k), "title": lookup[str(k)]["nome"], "description": lookup[str(k)].get("descricao") or "", "url": lookup[str(k)]["link_afiliado"]} for k in ids if str(k) in lookup and str(lookup[str(k)].get("link_afiliado") or "").startswith(("https://", "http://"))]
-        return {"status": "OK", "total": len(items), "data": items}
+        # Legacy solution links are not proof of commercial eligibility.
+        # Do not expose unverified external affiliate URLs. Canonical
+        # opportunities must be approved in Core V1 and mapped explicitly.
+        return {"status": "OK", "total": 0, "data": []}
     except HTTPException:
         raise
     except Exception:
