@@ -69,6 +69,8 @@ def discovery_summary():
         if not isinstance(programmes, list) or not isinstance(joined, list):
             raise ValueError("unexpected programme response")
         joined_ids = {str(p.get("id")) for p in joined if isinstance(p, dict)}
+        # Verify which programme metadata is present without inferring approval.
+        catalogue_program = next((p for p in programmes if isinstance(p, dict) and str(p.get("id")) == "81383"), None)
         sectors = Counter(str(p.get("primarySector") or "unknown") for p in programmes if isinstance(p, dict))
         regions = Counter(str(p.get("primaryRegion") or "unknown") for p in programmes if isinstance(p, dict))
         return {
@@ -76,6 +78,8 @@ def discovery_summary():
             "joined_programmes": len(joined),
             "catalogue_merchant_id": "81383",
             "catalogue_merchant_joined": "81383" in joined_ids,
+            "catalogue_merchant_discoverable": catalogue_program is not None,
+            "catalogue_merchant_status": str(catalogue_program.get("status")) if catalogue_program else None,
             "sector_counts": dict(sectors.most_common()),
             "region_counts": dict(regions.most_common()),
             "offers_authorized_for_publication": 0,
