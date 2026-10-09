@@ -109,8 +109,9 @@ def discovery_shortlist(region: str = "BR", limit: int = 30):
             if not isinstance(p, dict):
                 continue
             primary = p.get("primaryRegion")
-            code = primary.get("countryCode", "") if isinstance(primary, dict) else str(primary or "")
-            if code.upper() != region:
+            code = str(primary.get("countryCode") or primary.get("code") or primary.get("name") or "") if isinstance(primary, dict) else str(primary or "")
+            aliases = {"BR": {"BR", "BRA", "BRAZIL", "BRASIL"}, "US": {"US", "USA", "UNITED STATES"}, "GB": {"GB", "UK", "UNITED KINGDOM"}}
+            if code.strip().upper() not in aliases.get(region, {region}):
                 continue
             matches.append({
                 "id": p.get("id"),
