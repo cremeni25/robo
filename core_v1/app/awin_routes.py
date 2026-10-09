@@ -176,6 +176,11 @@ def check_awin_oauth_at_startup():
             else:
                 raise ValueError("unexpected response")
             logger.warning("AWIN_OAUTH_CHECK success programs=%s", count)
+            # Read-only membership breakdown; no offers are approved or published here.
+            if isinstance(data, list):
+                from collections import Counter
+                statuses = Counter(str(p.get("relationship", p.get("membershipStatus", p.get("membership_status", "unknown")))).lower() for p in data if isinstance(p, dict))
+                logger.warning("AWIN_MEMBERSHIP_DISCOVERY total=%s statuses=%s", count, dict(statuses.most_common(12)))
         except HTTPError as exc:
             logger.error("AWIN_OAUTH_CHECK http_status=%s", exc.code)
         except Exception as exc:
