@@ -2,7 +2,6 @@
 import json
 import os
 from urllib.request import Request, urlopen
-from urllib.parse import urlencode
 
 
 def discover(fetch=urlopen, environment=None):
@@ -12,8 +11,7 @@ def discover(fetch=urlopen, environment=None):
     if not token or not publisher.isdigit():
         return {"status": "configuration_required", "advertiser_count": 0}
 
-    query = urlencode({"relationship": "all"})
-    endpoint = f"https://api.awin.com/publishers/{publisher}/programmes?{query}"
+    endpoint = f"https://api.awin.com/publishers/{publisher}/programmes"
     request = Request(endpoint, headers={
         "Authorization": "Bearer " + token,
         "Accept": "application/json",
@@ -27,15 +25,16 @@ def discover(fetch=urlopen, environment=None):
     for record in records:
         if not isinstance(record, dict):
             continue
-        relation = record.get("relationship", record.get("status", "unknown"))
+        relation = record.get("membershipStatus", record.get("relationship", "unknown"))
         if isinstance(relation, dict):
             relation = relation.get("status", "unknown")
-        key = str(relation).lower()
+        key = str(relation).strip().lower()
         statuses[key] = statuses.get(key, 0) + 1
     return {
         "status": "discovered",
         "advertiser_count": len(records),
         "relationship_counts": statuses,
+        "relationship_status_verified": all(k != "unknown" for k in statuses),
         "offers_published": 0,
         "commercial_approval_automated": False,
     }
