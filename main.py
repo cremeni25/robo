@@ -2152,7 +2152,7 @@ def resumo_catalogo_awin(request: Request):
             "total": total,
             "candidates": candidates,
             "approved_or_published": approved,
-            "ready_for_publication": candidates == 0 and approved > 0,
+            "ready_for_publication": False,  # Requires independent terms, membership and link verification.
             "policy": "Candidatas nao sao publicadas; autorizacao comercial deve ser comprovada."
         }
     except Exception:
