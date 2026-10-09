@@ -834,7 +834,8 @@ def cms_criar_nicho(payload: NichoCMS, request: Request):
         table_rg("nichos").insert({
             "title": payload.title,
             "slug": payload.slug,
-            "description": payload.description
+            "description": payload.description or "",
+            "published": False
         }).execute()
 
         log("CMS", "INFO", f"Nicho criado via MASTER: {payload.slug}")
