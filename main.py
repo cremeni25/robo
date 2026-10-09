@@ -1204,7 +1204,8 @@ class ProdutoMaster(BaseModel):
 
 
 @app.post("/master/produto")
-def master_cadastrar_produto(payload: ProdutoMaster):
+def master_cadastrar_produto(payload: ProdutoMaster, request: Request):
+    validar_master(request)
 
     try:
         gul = gerar_gul(
