@@ -2135,3 +2135,26 @@ async def vincular_solucao(payload: dict):
         raise HTTPException(status_code=400, detail=str(e))
 
 # Legacy public catalog routes retired: canonical B1 is served exclusively by /public/nichos and its child routes.
+
+
+# Canonical affiliate inventory: private, read-only review for Master.
+# Candidate offers are never published through this endpoint.
+@app.get("/master/catalogo/awin/resumo")
+def resumo_catalogo_awin(request: Request):
+    validar_master(request)
+    try:
+        query = sb.schema("robo_global_core").table("offers")
+        total = query.select("id", count="exact", head=True).eq("platform", "AWIN").execute().count or 0
+        candidates = query.select("id", count="exact", head=True).eq("platform", "AWIN").eq("status", "candidate").execute().count or 0
+        approved = query.select("id", count="exact", head=True).eq("platform", "AWIN").in_("status", ["approved", "published"]).execute().count or 0
+        return {
+            "platform": "AWIN",
+            "total": total,
+            "candidates": candidates,
+            "approved_or_published": approved,
+            "ready_for_publication": candidates == 0 and approved > 0,
+            "policy": "Candidatas nao sao publicadas; autorizacao comercial deve ser comprovada."
+        }
+    except Exception:
+        log("CATALOGO", "ERRO", "Falha ao consultar inventario AWIN")
+        raise HTTPException(status_code=503, detail="Inventario comercial indisponivel")
