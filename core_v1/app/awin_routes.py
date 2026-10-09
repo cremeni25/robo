@@ -180,7 +180,7 @@ def check_awin_oauth_at_startup():
             if isinstance(data, list):
                 from collections import Counter
                 statuses = Counter(str(p.get("relationship", p.get("membershipStatus", p.get("membership_status", "unknown")))).lower() for p in data if isinstance(p, dict))
-                logger.warning("AWIN_MEMBERSHIP_DISCOVERY total=%s statuses=%s", count, dict(statuses.most_common(12)))
+                logger.warning("AWIN_MEMBERSHIP_DISCOVERY total=%s statuses=%s keys=%s", count, dict(statuses.most_common(12)), sorted(data[0].keys()) if data and isinstance(data[0], dict) else [])
         except HTTPError as exc:
             logger.error("AWIN_OAUTH_CHECK http_status=%s", exc.code)
         except Exception as exc:
