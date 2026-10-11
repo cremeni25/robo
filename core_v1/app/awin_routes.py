@@ -129,6 +129,35 @@ def discovery_shortlist(region: str = "BR", limit: int = 30):
         raise HTTPException(502, "Awin shortlist unavailable")
 
 
+@router.get("/discovery/application-status", dependencies=[Depends(_auth)])
+def discovery_application_status(advertiser_id: int):
+    """Inspect actual Awin membership; never infer approval from a product feed."""
+    if advertiser_id <= 0:
+        raise HTTPException(422, "invalid advertiser id")
+    try:
+        client = AwinClient(int(os.environ["AWIN_PUBLISHER_ID"]), os.environ["AWIN_API_TOKEN"])
+        all_programmes = client.programs()
+        joined_programmes = client.programs("joined")
+        if not isinstance(all_programmes, list) or not isinstance(joined_programmes, list):
+            raise ValueError("unexpected Awin response")
+        item = next((p for p in all_programmes if isinstance(p, dict) and str(p.get("id")) == str(advertiser_id)), None)
+        joined = any(isinstance(p, dict) and str(p.get("id")) == str(advertiser_id) for p in joined_programmes)
+        return {
+            "advertiser_id": advertiser_id,
+            "advertiser": item.get("name") if item else None,
+            "discoverable": item is not None,
+            "membership": "joined" if joined else "not_confirmed",
+            "application_status": "approved" if joined else "unknown_from_programme_list",
+            "publication_authorized": False,
+            "next_action": "verify_terms_tracking_and_channels" if joined else "check_application_in_awin_portal",
+            "note": "Not joined does not establish rejection. Awin programme listing cannot prove pending or declined status."
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(502, "Awin application status unavailable")
+
+
 @router.get("/discovery/priorities", dependencies=[Depends(_auth)])
 def discovery_priorities(region: str = "BR", limit: int = 20):
     """Automated, read-only advertiser triage; never implies permission to promote."""
