@@ -208,8 +208,8 @@ def discovery_priorities(region: str = "BR", limit: int = 20):
 
 
 @router.get("/discovery/alternatives", dependencies=[Depends(_auth)])
-def discovery_alternatives(region: str = "BR", limit: int = 30, exclude_advertiser_id: int = 17697):
-    """Find alternatives independently of one pending advertiser; no invented approval."""
+def discovery_alternatives(region: str = "BR", limit: int = 30, exclude_advertiser_id: int = 0):
+    """Discover all advertisers by default; optionally exclude any specific advertiser."""
     if len(region) != 2 or not region.isalpha() or not 1 <= limit <= 100 or exclude_advertiser_id < 0:
         raise HTTPException(422, "invalid parameters")
     try:
@@ -222,7 +222,7 @@ def discovery_alternatives(region: str = "BR", limit: int = 30, exclude_advertis
         wanted = region.upper()
         candidates = []
         for p in programmes:
-            if not isinstance(p, dict) or str(p.get("id")) == str(exclude_advertiser_id):
+            if not isinstance(p, dict) or (exclude_advertiser_id > 0 and str(p.get("id")) == str(exclude_advertiser_id)):
                 continue
             primary = p.get("primaryRegion")
             code = str((primary.get("countryCode") or primary.get("code") or "") if isinstance(primary, dict) else (primary or "")).strip().upper()
