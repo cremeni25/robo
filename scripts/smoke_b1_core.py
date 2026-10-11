@@ -33,9 +33,25 @@ def check_catalog(data):
     assert data.get("total") == len(data["data"])
     assert all(isinstance(row.get("slug"), str) and row.get("title") for row in data["data"])
 
+def check_offers(data):
+    assert isinstance(data, dict) and data.get("status") == "OK"
+    assert isinstance(data.get("data"), list)
+    assert data.get("total") == len(data["data"])
+    for item in data["data"]:
+        assert item["url"] == "/go/" + item["id"], "untracked external URL exposed"
+
+def check_offers_core(data):
+    assert isinstance(data, dict) and data.get("status") == "OK"
+    assert isinstance(data.get("data"), list)
+    assert data.get("total") == len(data["data"])
+    for item in data["data"]:
+        assert item["url"] == "/r/" + item["id"], "noncanonical Core redirect"
+
 def main():
     check(API + "/status", 200)
     check(API + "/public/nichos", 200, check_catalog)
+    check(CORE + "/v1/public/catalog", 200, check_offers_core)
+    check(API + "/public/ofertas", 200, check_offers)
     # A non-UUID legacy GUL must never redirect to a merchant.
     check(API + "/go/legacy-smoke-invalid", 503)
     # An unknown UUID can be routed to Core, but must not create a click or redirect to a merchant.
