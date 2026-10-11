@@ -165,6 +165,8 @@ def discovery_priorities(region: str = "BR", limit: int = 20):
                              "editorial_fit_candidate": fit, "terms_reviewed": False,
                              "tracking_verified": False, "publication_authorized": False,
                              "next_action": "review_terms_and_tracking" if joined_ok else "apply_for_program"})
+        # Pending enrollment is explicitly distinguished from confirmed membership.
+        # The Awin API may not expose application status on this endpoint.
         selected.sort(key=lambda x: (-x["priority_score"], str(x["advertiser"] or "").casefold()))
         return {"region": wanted, "programmes_evaluated": len(programmes),
                 "regional_candidates": len(selected), "returned": min(len(selected), limit),
@@ -174,6 +176,14 @@ def discovery_priorities(region: str = "BR", limit: int = 20):
         raise
     except Exception:
         raise HTTPException(502, "Awin prioritized discovery unavailable")
+
+
+@router.get("/discovery/health")
+def discovery_health():
+    """Public non-sensitive operational status; no credentials, membership or names."""
+    return {"status": "ready", "prioritization_route": "/v1/awin/discovery/priorities",
+            "prioritization_requires_auth": True, "automated_enrollment": False,
+            "commercial_publication_requires_approval": True}
 
 
 @router.get("/discovery/regions", dependencies=[Depends(_auth)])
