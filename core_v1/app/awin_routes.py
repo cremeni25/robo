@@ -129,6 +129,53 @@ def discovery_shortlist(region: str = "BR", limit: int = 30):
         raise HTTPException(502, "Awin shortlist unavailable")
 
 
+@router.get("/discovery/priorities", dependencies=[Depends(_auth)])
+def discovery_priorities(region: str = "BR", limit: int = 20):
+    """Automated, read-only advertiser triage; never implies permission to promote."""
+    if len(region) != 2 or not region.isalpha() or not 1 <= limit <= 50:
+        raise HTTPException(422, "invalid region or limit")
+    try:
+        client = AwinClient(int(os.environ["AWIN_PUBLISHER_ID"]), os.environ["AWIN_API_TOKEN"])
+        programmes = client.programs()
+        joined = client.programs("joined")
+        if not isinstance(programmes, list) or not isinstance(joined, list):
+            raise ValueError("unexpected API response")
+        joined_ids = {str(p.get("id")) for p in joined if isinstance(p, dict)}
+        aliases = {"BR": {"BR", "BRA", "BRAZIL", "BRASIL"}, "US": {"US", "USA", "UNITED STATES"}, "GB": {"GB", "UK", "UNITED KINGDOM"}}
+        wanted = region.upper()
+        selected = []
+        for p in programmes:
+            if not isinstance(p, dict):
+                continue
+            primary = p.get("primaryRegion")
+            raw_region = (primary.get("countryCode") or primary.get("code") or primary.get("name") or "") if isinstance(primary, dict) else (primary or "")
+            if str(raw_region).strip().upper() not in aliases.get(wanted, {wanted}):
+                continue
+            status = str(p.get("status") or "").lower()
+            sector = p.get("primarySector")
+            sector_text = str(sector.get("name") or sector.get("sector") or "") if isinstance(sector, dict) else str(sector or "")
+            joined_ok = str(p.get("id")) in joined_ids
+            active = status == "active"
+            # Editorial fit is a discovery signal, not a validated product-to-need match.
+            fit = any(t in sector_text.lower() for t in ("health", "beauty", "fashion", "fitness", "education", "finance", "wellness", "saúde", "moda", "beleza", "educação"))
+            priority = (100 if joined_ok else 0) + (20 if active else 0) + (10 if fit else 0)
+            selected.append({"advertiser_id": p.get("id"), "advertiser": p.get("name"),
+                             "sector": sector_text, "region": wanted, "priority_score": priority,
+                             "programme_active": active, "publisher_joined": joined_ok,
+                             "editorial_fit_candidate": fit, "terms_reviewed": False,
+                             "tracking_verified": False, "publication_authorized": False,
+                             "next_action": "review_terms_and_tracking" if joined_ok else "apply_for_program"})
+        selected.sort(key=lambda x: (-x["priority_score"], str(x["advertiser"] or "").casefold()))
+        return {"region": wanted, "programmes_evaluated": len(programmes),
+                "regional_candidates": len(selected), "returned": min(len(selected), limit),
+                "candidates": selected[:limit], "publication_enabled": False,
+                "note": "Ranking automates research; applications and terms still require authorization."}
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(502, "Awin prioritized discovery unavailable")
+
+
 @router.get("/discovery/regions", dependencies=[Depends(_auth)])
 def discovery_regions():
     """Global coverage inventory; programme presence is not commercial eligibility."""
