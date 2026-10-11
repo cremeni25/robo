@@ -431,7 +431,7 @@ def control_offers(q: str = "", status: str = "", merchant: str = "", page: int 
     return HTMLResponse(document)
 
 
-@app.post("/v1/demands", status_code=201)
+@app.post("/v1/demands", status_code=201, dependencies=[Depends(require_ingest_key)])
 def create_demand(payload: DemandCreate):
     with db_connection() as conn:
         with conn.cursor() as cur:
@@ -444,7 +444,7 @@ def create_demand(payload: DemandCreate):
     return row
 
 
-@app.post("/v1/offers", status_code=201)
+@app.post("/v1/offers", status_code=201, dependencies=[Depends(require_ingest_key)])
 def create_offer(payload: OfferCreate):
     with db_connection() as conn:
         with conn.cursor() as cur:
@@ -458,7 +458,7 @@ def create_offer(payload: OfferCreate):
     return row
 
 
-@app.post("/v1/opportunities", status_code=201)
+@app.post("/v1/opportunities", status_code=201, dependencies=[Depends(require_ingest_key)])
 def create_opportunity(payload: OpportunityCreate):
     score=opportunity_score(payload.economic_potential,payload.signal_quality,payload.offer_fit,payload.data_confidence)
     with db_connection() as conn:
