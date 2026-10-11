@@ -157,7 +157,7 @@ def discovery_priorities(region: str = "BR", limit: int = 20):
             joined_ok = str(p.get("id")) in joined_ids
             active = status == "active"
             # Editorial fit is a discovery signal, not a validated product-to-need match.
-            fit = any(t in sector_text.lower() for t in ("health", "fitness", "nutrition", "weight", "education", "finance", "financial", "business", "employment", "wellness", "saúde", "nutrição", "educação", "finanças", "negócios", "emprego"))
+            fit = False  # Eight Awin sectors not yet reconciled; do not infer fit from legacy niches.
             priority = (100 if joined_ok else 0) + (20 if active else 0) + (10 if fit else 0)
             selected.append({"advertiser_id": p.get("id"), "advertiser": p.get("name"),
                              "sector": sector_text, "region": wanted, "priority_score": priority,
