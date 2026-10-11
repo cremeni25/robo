@@ -207,6 +207,49 @@ def discovery_priorities(region: str = "BR", limit: int = 20):
         raise HTTPException(502, "Awin prioritized discovery unavailable")
 
 
+@router.get("/discovery/alternatives", dependencies=[Depends(_auth)])
+def discovery_alternatives(region: str = "BR", limit: int = 30, exclude_advertiser_id: int = 17697):
+    """Find alternatives independently of one pending advertiser; no invented approval."""
+    if len(region) != 2 or not region.isalpha() or not 1 <= limit <= 100 or exclude_advertiser_id < 0:
+        raise HTTPException(422, "invalid parameters")
+    try:
+        client = AwinClient(int(os.environ["AWIN_PUBLISHER_ID"]), os.environ["AWIN_API_TOKEN"])
+        programmes = client.programs()
+        joined = client.programs("joined")
+        if not isinstance(programmes, list) or not isinstance(joined, list):
+            raise ValueError("unexpected Awin response")
+        joined_ids = {str(p.get("id")) for p in joined if isinstance(p, dict)}
+        wanted = region.upper()
+        candidates = []
+        for p in programmes:
+            if not isinstance(p, dict) or str(p.get("id")) == str(exclude_advertiser_id):
+                continue
+            primary = p.get("primaryRegion")
+            code = str((primary.get("countryCode") or primary.get("code") or "") if isinstance(primary, dict) else (primary or "")).strip().upper()
+            if code != wanted:
+                continue
+            joined_ok = str(p.get("id")) in joined_ids
+            candidates.append({
+                "advertiser_id": p.get("id"), "advertiser": p.get("name"),
+                "sector": p.get("primarySector"), "publisher_joined": joined_ok,
+                "programme_status": p.get("status"),
+                "publication_authorized": False,
+                "next_action": "verify_terms_and_tracking" if joined_ok else "evaluate_application",
+            })
+        candidates.sort(key=lambda p: (not p["publisher_joined"], str(p["advertiser"] or "").casefold()))
+        return {
+            "region": wanted, "excluded_advertiser_id": exclude_advertiser_id,
+            "regional_alternatives": len(candidates), "joined_alternatives": sum(1 for p in candidates if p["publisher_joined"]),
+            "returned": min(len(candidates), limit), "candidates": candidates[:limit],
+            "blocked_by_excluded_advertiser": False,
+            "note": "Advertiser discovery continues; publication requires independently verified membership, terms and tracking.",
+        }
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(502, "Awin alternative discovery unavailable")
+
+
 @router.get("/discovery/health")
 def discovery_health():
     """Public non-sensitive operational status; no credentials, membership or names."""
