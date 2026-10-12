@@ -455,6 +455,10 @@ def check_awin_oauth_at_startup():
                 else:
                     promotion_count, shape = -1, type(promotions_data).__name__
                 logger.warning("AWIN_PROMOTIONS_PROBE success count=%s shape=%s", promotion_count, shape)
+            except HTTPError as exc:
+                logger.warning("AWIN_PROMOTIONS_PROBE http_status=%s", exc.code)
+            except Exception as exc:
+                logger.warning("AWIN_PROMOTIONS_PROBE error_type=%s", type(exc).__name__)
             # Check the broader publisher catalogue separately. Do not treat
             # visibility as permission to publish or earn commission.
             try:
@@ -465,10 +469,6 @@ def check_awin_oauth_at_startup():
                 logger.warning("AWIN_PROMOTIONS_ALL_PROBE http_status=%s", exc.code)
             except Exception as exc:
                 logger.warning("AWIN_PROMOTIONS_ALL_PROBE error_type=%s", type(exc).__name__)
-            except HTTPError as exc:
-                logger.warning("AWIN_PROMOTIONS_PROBE http_status=%s", exc.code)
-            except Exception as exc:
-                logger.warning("AWIN_PROMOTIONS_PROBE error_type=%s", type(exc).__name__)
 
             try:
                 joined = AwinClient(int(os.environ["AWIN_PUBLISHER_ID"]), os.environ["AWIN_API_TOKEN"]).programs("joined")
