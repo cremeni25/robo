@@ -475,13 +475,13 @@ def create_opportunity(payload: OpportunityCreate):
 
 @app.get("/v1/public/catalog")
 def public_eligible_catalog():
-    """Only commercially active Core opportunities; never expose candidate offers."""
+    """Expose all eligible active offers, including new opportunities without performance history."""
     with db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(f"""select o.id as opportunity_id, f.name as title, o.market, o.language
                 from {settings.core_schema}.opportunities o
                 join {settings.core_schema}.offers f on f.id=o.offer_id
-                where o.status in ('testing','winner') and f.status='active'
+                where o.status in ('candidate','testing','winner') and f.status='active'
                 and f.tracking_strategy in ('query_param','url_template')
                 and (f.evidence->>'membership_status' = 'joined' or lower(coalesce(f.evidence->>'soft_membership_verified','false')) = 'true')
                 and lower(coalesce(f.evidence->>'terms_reviewed','false')) = 'true'
@@ -503,7 +503,7 @@ def redirect_opportunity(opportunity_id: UUID, request: Request):
         with conn.cursor() as cur:
             cur.execute(f"""select o.id opportunity_id,o.offer_id,f.affiliate_url,f.tracking_strategy,f.tracking_template
             from {settings.core_schema}.opportunities o join {settings.core_schema}.offers f on f.id=o.offer_id
-            where o.id=%s and o.status in ('testing','winner') and f.status='active'
+            where o.id=%s and o.status in ('candidate','testing','winner') and f.status='active'
               and f.tracking_strategy in ('query_param','url_template')
                 and (f.evidence->>'membership_status' = 'joined' or lower(coalesce(f.evidence->>'soft_membership_verified','false')) = 'true')
               and lower(coalesce(f.evidence->>'terms_reviewed','false')) = 'true'
