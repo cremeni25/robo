@@ -58,6 +58,18 @@ def programs():
         raise HTTPException(502, "Awin program discovery unavailable")
 
 
+@router.get("/promotions", dependencies=[Depends(_auth)])
+def publisher_promotions(region: str = "BR", membership: str = "joined", page: int = 1):
+    """Actual Awin promotions; a visible promotion is not by itself publication permission."""
+    try:
+        client = AwinClient(int(os.environ["AWIN_PUBLISHER_ID"]), os.environ["AWIN_API_TOKEN"])
+        return {"region": region.upper(), "membership": membership,
+                "promotions": client.promotions(membership=membership, region=region, page=page),
+                "publication_enabled": False}
+    except Exception:
+        raise HTTPException(502, "Awin promotions unavailable")
+
+
 @router.get("/discovery/summary", dependencies=[Depends(_auth)])
 def discovery_summary():
     """Read-only advertiser discovery. Active does not imply publisher approval."""
