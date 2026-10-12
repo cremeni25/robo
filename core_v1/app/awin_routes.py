@@ -250,6 +250,38 @@ def discovery_alternatives(region: str = "BR", limit: int = 30, exclude_advertis
         raise HTTPException(502, "Awin alternative discovery unavailable")
 
 
+@router.get("/discovery/operations", dependencies=[Depends(_auth)])
+def discovery_operations():
+    """Evidence-backed commercial funnel, without exposing secrets or personal data."""
+    from psycopg.rows import dict_row
+    try:
+        with connect(os.environ["DATABASE_URL"], row_factory=dict_row) as conn:
+            with conn.cursor() as cur:
+                cur.execute("""select status, count(*)::int as total
+                    from robo_global_core.offers where platform='AWIN' group by status""")
+                offer_counts = {row["status"]: row["total"] for row in cur.fetchall()}
+                cur.execute("""select count(distinct split_part(external_product_id, ':', 1))::int as advertisers,
+                    max(updated_at) as last_catalog_update
+                    from robo_global_core.offers
+                    where platform='AWIN' and external_product_id is not null""")
+                inventory = cur.fetchone()
+                cur.execute("""select status, count(*)::int as total
+                    from robo_global_core.opportunities group by status""")
+                opportunity_counts = {row["status"]: row["total"] for row in cur.fetchall()}
+        return {
+            "candidate_products": offer_counts.get("candidate", 0),
+            "validated_products": offer_counts.get("validated", 0),
+            "active_products": offer_counts.get("active", 0),
+            "advertisers_in_product_feed": inventory["advertisers"],
+            "last_catalog_update": inventory["last_catalog_update"].isoformat() if inventory["last_catalog_update"] else None,
+            "opportunities": opportunity_counts,
+            "commercial_publication_ready": bool(offer_counts.get("active", 0) and (opportunity_counts.get("testing", 0) or opportunity_counts.get("winner", 0))),
+            "next_action": "verify_programme_memberships_terms_and_tracking",
+        }
+    except Exception:
+        raise HTTPException(502, "Commercial operations diagnostics unavailable")
+
+
 @router.get("/discovery/health")
 def discovery_health():
     """Public non-sensitive operational status; no credentials, membership or names."""
