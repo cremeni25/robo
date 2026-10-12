@@ -117,5 +117,14 @@ class AwinClient:
             raise AwinError("invalid membership filter")
         return self.get(f"/publishers/{self.publisher_id}/programmes" + (f"?relationship={membership}" if membership != "all" else ""))
 
+    def promotions(self, membership: str = "joined", region: str = "BR", page: int = 1) -> Any:
+        """Fetch real publisher promotions from Awin's documented API."""
+        if membership not in {"joined", "notJoined", "all"} or len(region) != 2 or not region.isalpha() or not 1 <= page <= 100:
+            raise AwinError("invalid promotion filters")
+        payload = json.dumps({"filters": {"membership": membership, "regionCodes": [region.upper()], "status": "active", "type": "all"}, "pagination": {"page": page, "pageSize": 50}}).encode("utf-8")
+        request = Request(self.BASE + f"/publisher/{self.publisher_id}/promotions", data=payload, headers={"Authorization": "Bearer " + self._token, "Accept": "application/json", "Content-Type": "application/json"}, method="POST")
+        with urlopen(request, timeout=25) as response:
+            return json.load(response)
+
     def program_details(self) -> Any:
         return self.get(f"/publishers/{self.publisher_id}/programmedetails")
