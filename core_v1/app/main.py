@@ -485,7 +485,7 @@ def public_eligible_catalog():
                 and f.tracking_strategy in ('query_param','url_template')
                 and f.evidence->>'membership_status' = 'joined'
                 and lower(coalesce(f.evidence->>'terms_reviewed','false')) = 'true'
-                and f.evidence->>'eligibility' = 'approved'
+                and f.evidence->>'eligibility' = 'verified'
                 order by o.created_at desc limit 100""")
             rows=cur.fetchall()
     items=[{"id":str(row["opportunity_id"]),"title":row["title"],
@@ -505,7 +505,7 @@ def redirect_opportunity(opportunity_id: UUID, request: Request):
               and f.tracking_strategy in ('query_param','url_template')
                 and f.evidence->>'membership_status' = 'joined'
               and lower(coalesce(f.evidence->>'terms_reviewed','false')) = 'true'
-              and f.evidence->>'eligibility' = 'approved'""",(opportunity_id,))
+              and f.evidence->>'eligibility' = 'verified'""",(opportunity_id,))
             row=cur.fetchone()
             if not row: raise HTTPException(status_code=404,detail="opportunity not commercially active")
             destination=tracked_url(row["affiliate_url"],row["tracking_strategy"],row["tracking_template"],attribution_key)
