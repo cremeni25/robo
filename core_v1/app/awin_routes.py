@@ -71,8 +71,8 @@ def discovery_summary():
         joined_ids = {str(p.get("id")) for p in joined if isinstance(p, dict)}
         # Verify which programme metadata is present without inferring approval.
         catalogue_program = next((p for p in programmes if isinstance(p, dict) and str(p.get("id")) == "81383"), None)
-        sectors = Counter(str(p.get("primarySector") or "unknown") for p in programmes if isinstance(p, dict))
-        regions = Counter(str(p.get("primaryRegion") or "unknown") for p in programmes if isinstance(p, dict))
+        sectors = Counter(str((p.get("primarySector") or {}).get("name") or (p.get("primarySector") or {}).get("sector") or "unknown") if isinstance(p.get("primarySector"), dict) else str(p.get("primarySector") or "unknown") for p in programmes if isinstance(p, dict))
+        regions = Counter(str((p.get("primaryRegion") or {}).get("countryCode") or (p.get("primaryRegion") or {}).get("name") or "unknown") if isinstance(p.get("primaryRegion"), dict) else str(p.get("primaryRegion") or "unknown") for p in programmes if isinstance(p, dict))
         return {
             "programmes_discovered": len(programmes),
             "joined_programmes": len(joined),
