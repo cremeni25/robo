@@ -443,6 +443,23 @@ def check_awin_oauth_at_startup():
             else:
                 raise ValueError("unexpected response")
             logger.warning("AWIN_OAUTH_CHECK success programs=%s", count)
+            # Verify the promotions integration using the server's existing credentials.
+            # Log only HTTP status and response structure, never tokens or promotion URLs.
+            try:
+                promotions_data = AwinClient(int(os.environ["AWIN_PUBLISHER_ID"]), os.environ["AWIN_API_TOKEN"]).promotions(membership="joined", region="BR", page=1)
+                if isinstance(promotions_data, list):
+                    promotion_count, shape = len(promotions_data), "list"
+                elif isinstance(promotions_data, dict):
+                    promotion_count = len(promotions_data.get("data", [])) if isinstance(promotions_data.get("data"), list) else -1
+                    shape = "dict_keys_" + "_".join(sorted(k for k in promotions_data if k in {"data", "pagination", "promotions", "results", "total"}))
+                else:
+                    promotion_count, shape = -1, type(promotions_data).__name__
+                logger.warning("AWIN_PROMOTIONS_PROBE success count=%s shape=%s", promotion_count, shape)
+            except HTTPError as exc:
+                logger.warning("AWIN_PROMOTIONS_PROBE http_status=%s", exc.code)
+            except Exception as exc:
+                logger.warning("AWIN_PROMOTIONS_PROBE error_type=%s", type(exc).__name__)
+
             try:
                 joined = AwinClient(int(os.environ["AWIN_PUBLISHER_ID"]), os.environ["AWIN_API_TOKEN"]).programs("joined")
                 logger.warning("AWIN_JOINED_DISCOVERY count=%s", len(joined) if isinstance(joined, list) else -1)
