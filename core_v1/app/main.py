@@ -483,7 +483,7 @@ def public_eligible_catalog():
                 join {settings.core_schema}.offers f on f.id=o.offer_id
                 where o.status in ('testing','winner') and f.status='active'
                 and f.tracking_strategy in ('query_param','url_template')
-                and f.evidence->>'membership_status' = 'joined'
+                and (f.evidence->>'membership_status' = 'joined' or lower(coalesce(f.evidence->>'soft_membership_verified','false')) = 'true')
                 and lower(coalesce(f.evidence->>'terms_reviewed','false')) = 'true'
                 and f.evidence->>'eligibility' = 'verified'
                 order by o.created_at desc limit 100""")
@@ -503,7 +503,7 @@ def redirect_opportunity(opportunity_id: UUID, request: Request):
             from {settings.core_schema}.opportunities o join {settings.core_schema}.offers f on f.id=o.offer_id
             where o.id=%s and o.status in ('testing','winner') and f.status='active'
               and f.tracking_strategy in ('query_param','url_template')
-                and f.evidence->>'membership_status' = 'joined'
+                and (f.evidence->>'membership_status' = 'joined' or lower(coalesce(f.evidence->>'soft_membership_verified','false')) = 'true')
               and lower(coalesce(f.evidence->>'terms_reviewed','false')) = 'true'
               and f.evidence->>'eligibility' = 'verified'""",(opportunity_id,))
             row=cur.fetchone()
