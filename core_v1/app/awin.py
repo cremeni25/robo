@@ -113,7 +113,7 @@ class AwinClient:
             return json.load(response)
 
     def programs(self, membership: str = "all") -> Any:
-        if membership not in {"all", "joined", "notjoined"}:
+        if membership not in {"all", "joined", "pending", "suspended", "rejected", "notjoined"}:
             raise AwinError("invalid membership filter")
         return self.get(f"/publishers/{self.publisher_id}/programmes" + (f"?relationship={membership}" if membership != "all" else ""))
 
