@@ -69,7 +69,7 @@ def sync_once(*, gmail_token: str, core_url: str, core_key: str) -> dict:
         req = urllib.request.Request(
             core_url.rstrip("/") + "/v1/awin/discovery/invitation-ingest",
             data=payload,
-            headers={"Content-Type": "application/json", "Authorization": f"Bearer {core_key}"},
+            headers={"Content-Type": "application/json", "x-core-ingest-key": core_key},
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=20) as response:
