@@ -338,6 +338,28 @@ def autonomy_readiness():
         raise HTTPException(502, "Autonomy readiness diagnostics unavailable")
 
 
+class InvitationTriageRequest(BaseModel):
+    advertiser: str = Field(min_length=1, max_length=200)
+    commission_base_percent: str | None = None
+    commission_bonus_percent: str | None = None
+    terms_available: bool = False
+
+
+@router.post("/discovery/invitation-triage", dependencies=[Depends(_auth)])
+def invitation_triage(payload: InvitationTriageRequest):
+    """Assess a received invitation without accepting terms or publishing offers."""
+    from core_v1.app.awin_invitations import InvitationSignal, triage_invitation
+    try:
+        return triage_invitation(InvitationSignal(
+            advertiser=payload.advertiser,
+            commission_base_percent=payload.commission_base_percent,
+            commission_bonus_percent=payload.commission_bonus_percent,
+            terms_available=payload.terms_available,
+        ))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+
+
 @router.get("/discovery/health")
 def discovery_health():
     """Public non-sensitive operational status; no credentials, membership or names."""
