@@ -11,6 +11,7 @@ from typing import Any, Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field, HttpUrl
@@ -36,6 +37,7 @@ class Settings(BaseSettings):
 
 settings = Settings()
 app = FastAPI(title="Robo Global Core API", version="1.0.0-alpha.5")
+app.add_middleware(CORSMiddleware, allow_origins=["https://robo-global-frontend.onrender.com", "https://roboglobal.com.br", "https://www.roboglobal.com.br"], allow_methods=["GET"], allow_headers=["Accept", "Content-Type"])
 app.include_router(awin_router)
 
 
