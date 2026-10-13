@@ -433,6 +433,54 @@ def discovery_regions():
         raise HTTPException(502, "Awin regional inventory unavailable")
 
 
+@router.post("/import-multiple", dependencies=[Depends(_auth)])
+def import_multiple_feeds(payload: ImportRequest):
+    """Ingest every configured approved-host feed as candidate inventory.
+
+    Feed access is independent of publisher membership; publication remains gated.
+    """
+    import json
+    raw = os.getenv("AWIN_FEED_URLS", "[]")
+    try:
+        urls = json.loads(raw)
+        if not isinstance(urls, list) or len(urls) > 50 or not all(isinstance(u, str) for u in urls):
+            raise ValueError("invalid feed configuration")
+    except (ValueError, TypeError):
+        raise HTTPException(503, "multi-feed configuration invalid")
+    legacy = os.getenv("AWIN_FEED_URL", "")
+    if legacy and legacy not in urls:
+        urls.insert(0, legacy)
+    if not urls:
+        raise HTTPException(503, "no feed sources configured")
+    if not os.getenv("DATABASE_URL"):
+        raise HTTPException(503, "database not configured")
+    totals = {"sources": len(urls), "successful_sources": 0, "discovered": 0,
+              "imported": 0, "candidates": 0, "eligible": 0, "skipped": 0}
+    for url in urls:
+        parsed = urlparse(url)
+        if parsed.scheme != "https" or parsed.hostname not in {"productdata.awin.com", "ui.awin.com"}:
+            totals["skipped"] += 1
+            continue
+        try:
+            req = Request(url, headers={"User-Agent": "RoboGlobalCore/1.0"})
+            with urlopen(req, timeout=45) as response:
+                if urlparse(response.geturl()).hostname not in {"productdata.awin.com", "ui.awin.com"}:
+                    raise ValueError("unexpected feed redirect")
+                content = response.read(15_000_001)
+            if len(content) > 15_000_000:
+                raise ValueError("feed too large")
+            offers = parse_feed(content, compressed=content.startswith(bytes([0x1f, 0x8b])),
+                                max_rows=payload.max_rows)
+            with connect(os.environ["DATABASE_URL"]) as conn:
+                summary = import_offers(conn, offers, {}, reviewed_terms=set(), dry_run=payload.dry_run)
+            totals["successful_sources"] += 1
+            for key in ("discovered", "imported", "candidates", "eligible", "skipped"):
+                totals[key] += getattr(summary, key)
+        except Exception:
+            totals["skipped"] += 1
+    return {**totals, "dry_run": payload.dry_run, "publication_enabled": False}
+
+
 @router.post("/import", dependencies=[Depends(_auth)])
 def import_feed(payload: ImportRequest):
     url = os.getenv("AWIN_FEED_URL", "")

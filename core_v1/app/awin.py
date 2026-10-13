@@ -128,3 +128,11 @@ class AwinClient:
 
     def program_details(self) -> Any:
         return self.get(f"/publishers/{self.publisher_id}/programmedetails")
+
+
+def feed_merchant_inventory(offers: list[AwinOffer]) -> dict[str, int]:
+    """Count discoverable products by advertiser, without implying approval."""
+    inventory: dict[str, int] = {}
+    for offer in offers:
+        inventory[offer.merchant_id] = inventory.get(offer.merchant_id, 0) + 1
+    return inventory
