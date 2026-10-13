@@ -1,0 +1,28 @@
+name: Awin autonomy safety tests
+
+on:
+  pull_request:
+    branches: [rebuild/core-v1]
+  push:
+    branches: [feature/awin-autonomy-readiness-20261013]
+
+jobs:
+  awin-autonomy:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://offline:offline@127.0.0.1:5432/offline
+      CORE_INGEST_KEY: test-only-key
+      AWIN_CANDIDATE_IMPORT_ON_STARTUP: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test dependencies
+        run: |
+          python -m pip install -r core_v1/requirements.txt
+          python -m pip install pytest httpx
+      - name: Validate Python syntax
+        run: python -m compileall -q core_v1/app core_v1/tests
+      - name: Run offline invitation tests
+        run: python -m pytest -q core_v1/tests/test_awin_invitations.py core_v1/tests/test_awin_invitation_route.py
