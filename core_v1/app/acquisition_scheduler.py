@@ -32,6 +32,15 @@ def _run_cycle() -> None:
     else:
         logger.warning("ACQUISITION_DISCOVERY_SKIPPED credentials_not_configured")
 
+    if os.getenv("AWIN_PUBLISHER_ID") and os.getenv("AWIN_API_TOKEN"):
+        try:
+            from core_v1.app.approved_service import publish_approved_service
+            result = publish_approved_service()
+            logger.warning("ACQUISITION_APPROVED_SERVICE status=%s reason=%s",
+                           result.get("status"), result.get("reason", "none"))
+        except Exception as exc:
+            logger.warning("ACQUISITION_APPROVED_SERVICE_FAILED category=%s", type(exc).__name__)
+
     if os.getenv("AWIN_FEED_URL") or os.getenv("AWIN_FEED_URLS"):
         try:
             result = import_multiple_feeds(ImportRequest(dry_run=False, max_rows=10000))
