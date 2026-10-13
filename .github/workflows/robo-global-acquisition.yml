@@ -1,0 +1,24 @@
+name: Robo Global supplier acquisition
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 */6 * * *"
+permissions:
+  contents: read
+jobs:
+  acquisition:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CORE_URL: ${{ secrets.ROBO_GLOBAL_CORE_URL }}
+      CORE_INGEST_KEY: ${{ secrets.ROBO_GLOBAL_CORE_INGEST_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check configured credentials
+        run: |
+          if [ -z "$CORE_URL" ] || [ -z "$CORE_INGEST_KEY" ]; then
+            echo "::error::Configure ROBO_GLOBAL_CORE_URL and ROBO_GLOBAL_CORE_INGEST_KEY in repository secrets"
+            exit 1
+          fi
+      - name: Discover suppliers and ingest configured feeds
+        run: python -m core_v1.app.acquisition_cycle
