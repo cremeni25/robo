@@ -294,6 +294,50 @@ def discovery_operations():
         raise HTTPException(502, "Commercial operations diagnostics unavailable")
 
 
+
+@router.get("/discovery/autonomy-readiness", dependencies=[Depends(_auth)])
+def autonomy_readiness():
+    """Read-only, evidence-based autonomy diagnostics; never imply Awin approval."""
+    from psycopg.rows import dict_row
+    try:
+        with connect(os.environ["DATABASE_URL"], row_factory=dict_row) as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    select count(*)::int as total,
+                      count(*) filter (where status='candidate')::int as candidates,
+                      count(*) filter (where status='active')::int as active,
+                      count(*) filter (where evidence->>'membership_status' in ('joined','approved'))::int as membership_evidence,
+                      count(*) filter (where lower(coalesce(evidence->>'terms_reviewed','false'))='true')::int as terms_reviewed,
+                      count(*) filter (where lower(coalesce(evidence->>'channel_permitted','false'))='true')::int as channel_permitted,
+                      count(*) filter (where tracking_strategy in ('query_param','url_template')
+                        and nullif(trim(tracking_template),'') is not null)::int as tracking_ready
+                    from robo_global_core.offers where platform='AWIN'
+                """)
+                offers = dict(cur.fetchone())
+                cur.execute("select count(*)::int as total from robo_global_core.opportunities")
+                opportunities = cur.fetchone()["total"]
+        return {
+            "status": "diagnostic",
+            "integration": {
+                "publisher_id_configured": bool(os.getenv("AWIN_PUBLISHER_ID")),
+                "api_token_configured": bool(os.getenv("AWIN_API_TOKEN")),
+                "feed_url_configured": bool(os.getenv("AWIN_FEED_URL")),
+            },
+            "offers": offers,
+            "opportunities": opportunities,
+            "automated_enrollment_implemented": False,
+            "publication_automatic_without_evidence": False,
+            "next_actions": [
+                "verify_publisher_program_relationships_via_awin",
+                "confirm_supported_enrollment_capabilities_before_implementation",
+                "validate_program_terms_and_permitted_channels",
+                "prepare_tracking_and_link_eligible_offers_to_real_demands",
+            ],
+        }
+    except Exception:
+        raise HTTPException(502, "Autonomy readiness diagnostics unavailable")
+
+
 @router.get("/discovery/health")
 def discovery_health():
     """Public non-sensitive operational status; no credentials, membership or names."""
