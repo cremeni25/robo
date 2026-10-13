@@ -23,3 +23,12 @@ def test_invitation_route_never_auto_approves(monkeypatch):
     assert response.status_code == 200
     assert response.json()["publication_ready"] is False
     assert response.json()["membership"] == "unverified"
+
+
+def test_ingest_requires_key_without_database_access(monkeypatch):
+    monkeypatch.setenv("CORE_INGEST_KEY", "test-only-key")
+    response = TestClient(app).post(
+        "/v1/awin/discovery/invitation-ingest",
+        json={"external_event_id": "sample-001", "advertiser": "Example"},
+    )
+    assert response.status_code == 401
