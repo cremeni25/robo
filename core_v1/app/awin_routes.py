@@ -287,7 +287,7 @@ def discovery_operations():
             "advertisers_in_product_feed": inventory["advertisers"],
             "last_catalog_update": inventory["last_catalog_update"].isoformat() if inventory["last_catalog_update"] else None,
             "opportunities": opportunity_counts,
-            "commercial_publication_ready": bool(offer_counts.get("active", 0) and (opportunity_counts.get("testing", 0) or opportunity_counts.get("winner", 0))),
+            "commercial_publication_ready": bool(offer_counts.get("active", 0) and sum(opportunity_counts.values()) > 0),
             "next_action": "verify_programme_memberships_terms_and_tracking",
         }
     except Exception:
