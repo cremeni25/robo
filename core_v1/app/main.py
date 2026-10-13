@@ -590,3 +590,10 @@ async def hotmart_webhook(request: Request, x_hotmart_hottok: str | None = Heade
             cur.execute(f"update {settings.core_schema}.affiliate_events_raw set processing_status='processed',processed_at=now() where id=%s",(raw_id,))
         conn.commit()
     return {"status":"processed","event_id":str(raw_id),"conversion_id":str(conversion["id"])}
+
+
+@app.on_event("startup")
+def start_acquisition_cycle() -> None:
+    """Start best-effort acquisition using this Core service's existing credentials."""
+    from core_v1.app.acquisition_scheduler import start_scheduler
+    start_scheduler()
