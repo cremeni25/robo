@@ -360,6 +360,48 @@ def invitation_triage(payload: InvitationTriageRequest):
         raise HTTPException(422, str(exc)) from None
 
 
+class InvitationIngestRequest(InvitationTriageRequest):
+    external_event_id: str = Field(min_length=1, max_length=160)
+
+
+@router.post("/discovery/invitation-ingest", dependencies=[Depends(_auth)])
+def invitation_ingest(payload: InvitationIngestRequest):
+    """Persist a minimal, idempotent invitation signal for an authorized adapter.
+
+    The adapter must authenticate with CORE_INGEST_KEY. Never send raw emails,
+    personal details, credentials or invitation URLs to this endpoint.
+    """
+    import hashlib
+    import json
+    from core_v1.app.awin_invitations import InvitationSignal, triage_invitation
+    try:
+        assessment = triage_invitation(InvitationSignal(
+            advertiser=payload.advertiser,
+            commission_base_percent=payload.commission_base_percent,
+            commission_bonus_percent=payload.commission_bonus_percent,
+            terms_available=payload.terms_available,
+        ))
+        canonical = json.dumps(assessment, sort_keys=True, separators=(",", ":"))
+        digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        with connect(os.environ["DATABASE_URL"]) as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    insert into robo_global_core.affiliate_events_raw
+                      (platform, external_event_id, event_type, payload, payload_hash)
+                    values ('AWIN', %s, 'invitation_received', %s::jsonb, %s)
+                    on conflict do nothing returning id
+                """, (payload.external_event_id, canonical, digest))
+                inserted = cur.fetchone() is not None
+            conn.commit()
+        return {"status": "recorded" if inserted else "already_recorded",
+                "advertiser": assessment["advertiser"],
+                "membership": "unverified", "publication_ready": False}
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
+    except Exception:
+        raise HTTPException(502, "Invitation ingestion unavailable")
+
+
 @router.get("/discovery/health")
 def discovery_health():
     """Public non-sensitive operational status; no credentials, membership or names."""
