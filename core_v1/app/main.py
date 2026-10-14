@@ -498,6 +498,7 @@ def public_eligible_catalog():
     return {"status":"OK","total":len(items),"data":items}
 
 
+@app.get("/go/{opportunity_id}")
 @app.get("/r/{opportunity_id}")
 def redirect_opportunity(opportunity_id: UUID, request: Request):
     attribution_key=secrets.token_urlsafe(18)
