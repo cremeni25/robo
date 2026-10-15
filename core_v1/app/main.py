@@ -500,7 +500,7 @@ def public_eligible_catalog():
     """Expose all eligible active offers, including new opportunities without performance history."""
     with db_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(f"""select o.id as opportunity_id, f.name as title, o.market, o.language
+            cur.execute(f"""select o.id as opportunity_id, f.name as title, f.platform as provider, o.market, o.language
                 from {settings.core_schema}.opportunities o
                 join {settings.core_schema}.offers f on f.id=o.offer_id
                 where o.status in ('candidate','testing','winner') and f.status='active'
@@ -513,7 +513,7 @@ def public_eligible_catalog():
                 order by o.created_at desc limit 100""")
             rows=cur.fetchall()
     items=[{"id":str(row["opportunity_id"]),"title":row["title"],
-            "market":row["market"],"language":row["language"],
+            "market":row["market"],"language":row["language"],"provider":row["provider"],
             "url":f"/r/{row['opportunity_id']}"} for row in rows]
     return {"status":"OK","total":len(items),"data":items}
 
