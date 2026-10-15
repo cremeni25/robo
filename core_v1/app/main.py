@@ -500,9 +500,10 @@ def public_eligible_catalog():
     """Expose all eligible active offers, including new opportunities without performance history."""
     with db_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(f"""select o.id as opportunity_id, f.name as title, f.platform as provider, o.market, o.language
+            cur.execute(f"""select o.id as opportunity_id, f.name as title, f.platform as provider, o.market, o.language, d.category as need_category, d.problem as need_problem, o.angle as solution_angle
                 from {settings.core_schema}.opportunities o
                 join {settings.core_schema}.offers f on f.id=o.offer_id
+                join {settings.core_schema}.demands d on d.id=o.demand_id
                 where o.status in ('candidate','testing','winner') and f.status='active'
                 and f.tracking_strategy in ('query_param','url_template')
                 and (f.evidence->>'membership_status' = 'joined' or lower(coalesce(f.evidence->>'soft_membership_verified','false')) = 'true')
@@ -514,6 +515,7 @@ def public_eligible_catalog():
             rows=cur.fetchall()
     items=[{"id":str(row["opportunity_id"]),"title":row["title"],
             "market":row["market"],"language":row["language"],"provider":row["provider"],
+            "need_category":row["need_category"],"need_problem":row["need_problem"],"solution_angle":row["solution_angle"],
             "url":f"/r/{row['opportunity_id']}"} for row in rows]
     return {"status":"OK","total":len(items),"data":items}
 
