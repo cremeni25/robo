@@ -475,6 +475,26 @@ def create_opportunity(payload: OpportunityCreate):
     return row
 
 
+@app.get("/v1/internal/b3/financial-reconciliation", dependencies=[Depends(require_ingest_key)])
+def b3_financial_reconciliation():
+    """Read-only reconciliation of legacy and Core V1 financial event states.
+
+    This endpoint does not approve sales, calculate partner shares, or move funds.
+    Access requires the existing server-to-server ingest credential.
+    """
+    with db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""select source, platform, sale_status, currency,
+                    transaction_count, gross_total, commission_total,
+                    attributed_transactions
+                    from {settings.core_schema}.financial_reconciliation
+                    order by source, platform, sale_status, currency"""
+            )
+            rows = cur.fetchall()
+    return {"status": "OK", "data": rows}
+
+
 @app.get("/v1/public/catalog")
 def public_eligible_catalog():
     """Expose all eligible active offers, including new opportunities without performance history."""
