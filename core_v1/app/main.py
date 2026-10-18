@@ -560,7 +560,7 @@ def ingest_affiliate_event(payload: AffiliateEventIn):
 def upsert_conversion(payload: ConversionUpsert):
     with db_connection() as conn:
         with conn.cursor() as cur:
-            interaction_id=None; opportunity_id=payload.opportunity_id
+            interaction_id=None; opportunity_id=payload.opportunity_id; offer_id=payload.offer_id
             if payload.attribution_key:
                 cur.execute(f"select id,opportunity_id,offer_id from {settings.core_schema}.interactions where attribution_key=%s",(payload.attribution_key,)); hit=cur.fetchone()
                 if hit:
@@ -568,12 +568,12 @@ def upsert_conversion(payload: ConversionUpsert):
                         raise HTTPException(status_code=409, detail="attribution opportunity mismatch")
                     if payload.offer_id is not None and payload.offer_id != hit["offer_id"]:
                         raise HTTPException(status_code=409, detail="attribution offer mismatch")
-                    interaction_id=hit["id"]; opportunity_id=hit["opportunity_id"]
+                    interaction_id=hit["id"]; opportunity_id=hit["opportunity_id"]; offer_id=hit["offer_id"]
             cur.execute(f"""insert into {settings.core_schema}.conversions
             (platform,external_sale_id,offer_id,opportunity_id,attribution_key,gross_value,commission_value,currency,status,occurred_at,raw_event_id,interaction_id)
             values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::timestamptz,%s,%s)
             on conflict (platform,external_sale_id) do update set offer_id=coalesce(excluded.offer_id,{settings.core_schema}.conversions.offer_id),opportunity_id=coalesce(excluded.opportunity_id,{settings.core_schema}.conversions.opportunity_id),attribution_key=coalesce(excluded.attribution_key,{settings.core_schema}.conversions.attribution_key),gross_value=excluded.gross_value,commission_value=excluded.commission_value,currency=excluded.currency,status=excluded.status,occurred_at=excluded.occurred_at,raw_event_id=coalesce(excluded.raw_event_id,{settings.core_schema}.conversions.raw_event_id),interaction_id=coalesce(excluded.interaction_id,{settings.core_schema}.conversions.interaction_id),updated_at=now() returning *""",
-            (payload.platform.upper(),payload.external_sale_id,payload.offer_id,opportunity_id,payload.attribution_key,payload.gross_value,payload.commission_value,payload.currency.upper(),payload.status,payload.occurred_at,payload.raw_event_id,interaction_id)); row=cur.fetchone()
+            (payload.platform.upper(),payload.external_sale_id,offer_id,opportunity_id,payload.attribution_key,payload.gross_value,payload.commission_value,payload.currency.upper(),payload.status,payload.occurred_at,payload.raw_event_id,interaction_id)); row=cur.fetchone()
         conn.commit()
     return row
 
