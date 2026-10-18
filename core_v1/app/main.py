@@ -601,8 +601,11 @@ async def hotmart_webhook(request: Request, x_hotmart_hottok: str | None = Heade
                 cur.execute(f"select id from {settings.core_schema}.offers where platform='HOTMART' and external_product_id=%s limit 1",(normalized.external_product_id,)); offer=cur.fetchone(); offer_id=offer["id"] if offer else None
             interaction_id=None; opportunity_id=None
             if normalized.attribution_key:
-                cur.execute(f"select id,opportunity_id from {settings.core_schema}.interactions where attribution_key=%s",(normalized.attribution_key,)); hit=cur.fetchone()
-                if hit: interaction_id=hit["id"]; opportunity_id=hit["opportunity_id"]
+                cur.execute(f"select id,opportunity_id,offer_id from {settings.core_schema}.interactions where attribution_key=%s",(normalized.attribution_key,)); hit=cur.fetchone()
+                if hit:
+                    if offer_id is not None and offer_id != hit["offer_id"]:
+                        raise HTTPException(status_code=409, detail="webhook offer attribution mismatch")
+                    interaction_id=hit["id"]; opportunity_id=hit["opportunity_id"]; offer_id=hit["offer_id"]
             occurred=datetime.fromtimestamp(normalized.occurred_at_ms/1000,tz=timezone.utc) if normalized.occurred_at_ms else datetime.now(timezone.utc)
             cur.execute(f"""insert into {settings.core_schema}.conversions
             (platform,external_sale_id,offer_id,opportunity_id,interaction_id,attribution_key,gross_value,commission_value,currency,status,occurred_at,raw_event_id)
