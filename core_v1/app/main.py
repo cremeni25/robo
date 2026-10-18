@@ -562,10 +562,12 @@ def upsert_conversion(payload: ConversionUpsert):
         with conn.cursor() as cur:
             interaction_id=None; opportunity_id=payload.opportunity_id
             if payload.attribution_key:
-                cur.execute(f"select id,opportunity_id from {settings.core_schema}.interactions where attribution_key=%s",(payload.attribution_key,)); hit=cur.fetchone()
+                cur.execute(f"select id,opportunity_id,offer_id from {settings.core_schema}.interactions where attribution_key=%s",(payload.attribution_key,)); hit=cur.fetchone()
                 if hit:
                     if opportunity_id is not None and opportunity_id != hit["opportunity_id"]:
                         raise HTTPException(status_code=409, detail="attribution opportunity mismatch")
+                    if payload.offer_id is not None and payload.offer_id != hit["offer_id"]:
+                        raise HTTPException(status_code=409, detail="attribution offer mismatch")
                     interaction_id=hit["id"]; opportunity_id=hit["opportunity_id"]
             cur.execute(f"""insert into {settings.core_schema}.conversions
             (platform,external_sale_id,offer_id,opportunity_id,attribution_key,gross_value,commission_value,currency,status,occurred_at,raw_event_id,interaction_id)
