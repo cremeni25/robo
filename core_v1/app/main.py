@@ -495,6 +495,44 @@ def b3_financial_reconciliation():
     return {"status": "OK", "data": rows}
 
 
+@app.get("/v1/public/catalog/by-need/{need_id}")
+def public_catalog_by_v2_need(need_id: UUID):
+    """Return commercially eligible opportunities explicitly mapped to a V2 need.
+
+    A V2 need is never inferred from free text. A demand must contain
+    evidence.v2_need_id with the exact V2 UUID, set after verification.
+    """
+    with db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"""select o.id as opportunity_id, f.name as title,
+                f.platform as provider, o.market, o.language,
+                d.category as need_category, d.problem as need_problem,
+                o.angle as solution_angle
+                from {settings.core_schema}.opportunities o
+                join {settings.core_schema}.offers f on f.id=o.offer_id
+                join {settings.core_schema}.demands d on d.id=o.demand_id
+                where d.evidence->>'v2_need_id' = %s
+                and o.status in ('candidate','testing','winner')
+                and f.status='active'
+                and f.tracking_strategy in ('query_param','url_template')
+                and (f.evidence->>'membership_status' = 'joined'
+                     or lower(coalesce(f.evidence->>'soft_membership_verified','false')) = 'true')
+                and lower(coalesce(f.evidence->>'terms_reviewed','false')) = 'true'
+                and f.evidence->>'eligibility' = 'verified'
+                and lower(coalesce(f.evidence->>'channel_permitted','false')) = 'true'
+                and f.tracking_template is not null
+                and length(trim(f.tracking_template)) > 0
+                order by o.created_at desc limit 100""", (str(need_id),))
+            rows = cur.fetchall()
+    return {"status":"OK","total":len(rows),"data":[
+        {"id":str(row["opportunity_id"]),"title":row["title"],
+         "market":row["market"],"language":row["language"],
+         "provider":row["provider"],"need_category":row["need_category"],
+         "need_problem":row["need_problem"],"solution_angle":row["solution_angle"],
+         "url":f"/r/{row['opportunity_id']}"}
+        for row in rows]}
+
+
 @app.get("/v1/public/catalog")
 def public_eligible_catalog():
     """Expose all eligible active offers, including new opportunities without performance history."""
