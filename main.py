@@ -1372,14 +1372,27 @@ def listar_solucoes_publicas_dor(dor_id: uuid.UUID):
         parent = table_rg("nichos").select("id,slug").eq("id", sub.data[0]["nicho_id"]).eq("published", True).limit(1).execute()
         if not parent.data or str(parent.data[0]["slug"]).lower().startswith(("teste-", "test-")):
             raise HTTPException(status_code=404, detail="Nicho nao encontrado")
-        links = table_rg("dor_solucoes").select("solucao_id,prioridade").eq("dor_id", str(dor_id)).eq("published", True).order("prioridade", desc=True).execute()
-        ids = [x["solucao_id"] for x in (links.data or [])]
-        if not ids:
-            return {"status": "OK", "total": 0, "data": []}
-        # Legacy solution links are not proof of commercial eligibility.
-        # Do not expose unverified external affiliate URLs. Canonical
-        # opportunities must be approved in Core V1 and mapped explicitly.
-        return {"status": "OK", "total": 0, "data": []}
+        # The editorial hierarchy establishes the real V2 need. Only Core V1
+        # authorizes matching opportunities and records the affiliate redirect.
+        import json as _json
+        import urllib.request as _request
+        req = _request.Request(
+            "https://robo-global-core-v1.onrender.com/v1/public/catalog/by-need/" + str(dor_id),
+            headers={"Accept": "application/json"},
+        )
+        with _request.urlopen(req, timeout=30) as response:
+            payload = _json.load(response)
+        if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+            raise ValueError("invalid core catalog")
+        items = []
+        for item in payload["data"]:
+            if not isinstance(item, dict):
+                raise ValueError("invalid core opportunity")
+            opportunity_id = uuid.UUID(str(item["id"]))
+            if item.get("url") != f"/r/{opportunity_id}":
+                raise ValueError("untracked core opportunity")
+            items.append({**item, "id": str(opportunity_id)})
+        return {"status": "OK", "total": len(items), "data": items}
     except HTTPException:
         raise
     except Exception:
