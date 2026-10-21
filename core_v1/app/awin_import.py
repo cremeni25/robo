@@ -6,10 +6,41 @@ can move offers to validated. No automated publishing or paid traffic.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any, Iterable
 
 from core_v1.app.awin import AwinOffer, eligibility_for_program
+
+
+def sync_candidate_memberships(conn: Any, joined_programs: Any) -> int:
+    """Record official membership evidence; never approve terms or publish offers.
+
+    Absence from the joined response means not confirmed, not rejected.
+    A malformed response must leave all stored evidence unchanged.
+    """
+    if not isinstance(joined_programs, list) or any(
+        not isinstance(p, dict) or not str(p.get("id", "")).isdigit()
+        for p in joined_programs
+    ):
+        raise ValueError("invalid joined-programmes response")
+    joined_ids = sorted({str(p["id"]) for p in joined_programs})
+    checked_at = datetime.now(timezone.utc).isoformat()
+    with conn.cursor() as cur:
+        cur.execute("""update robo_global_core.offers
+            set evidence=evidence || jsonb_build_object(
+                'membership_status',case
+                    when evidence->>'merchant_id'=any(%s::text[]) then 'joined'
+                    else 'not_confirmed' end,
+                'membership_checked_at',%s::text,
+                'membership_check_source','awin_publisher_programmes_joined'),
+                updated_at=now()
+            where platform='AWIN' and status='candidate'
+                and nullif(evidence->>'merchant_id','') is not null""",
+            (joined_ids, checked_at))
+        checked = cur.rowcount
+    conn.commit()
+    return checked
 
 
 @dataclass(frozen=True)

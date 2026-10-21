@@ -19,6 +19,7 @@ def _run_cycle() -> None:
     from core_v1.app.awin import AwinClient
     from core_v1.app.awin_routes import ImportRequest, import_multiple_feeds
 
+    joined = None
     if os.getenv("AWIN_PUBLISHER_ID") and os.getenv("AWIN_API_TOKEN"):
         try:
             client = AwinClient(int(os.environ["AWIN_PUBLISHER_ID"]), os.environ["AWIN_API_TOKEN"])
@@ -51,6 +52,18 @@ def _run_cycle() -> None:
             logger.warning("ACQUISITION_IMPORT_FAILED category=%s", type(exc).__name__)
     else:
         logger.warning("ACQUISITION_IMPORT_SKIPPED no_feed_configured")
+
+    # Use the official response already fetched in this cycle. Run after import
+    # so freshly imported candidates also retain independently checked evidence.
+    if joined is not None:
+        try:
+            from psycopg import connect
+            from core_v1.app.awin_import import sync_candidate_memberships
+            with connect(os.environ["DATABASE_URL"]) as conn:
+                checked = sync_candidate_memberships(conn, joined)
+            logger.warning("ACQUISITION_MEMBERSHIP_SYNC checked=%s publication_changed=false", checked)
+        except Exception as exc:
+            logger.warning("ACQUISITION_MEMBERSHIP_SYNC_FAILED category=%s", type(exc).__name__)
 
 
 def start_scheduler() -> None:
