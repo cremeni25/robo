@@ -1,0 +1,34 @@
+from fastapi.testclient import TestClient
+from core_v1.app.main import app
+
+
+def test_invitation_route_requires_ingest_key(monkeypatch):
+    monkeypatch.setenv("CORE_INGEST_KEY", "test-only-key")
+    response = TestClient(app).post("/v1/awin/discovery/invitation-triage", json={
+            "advertiser": "World Businesses for Sale",
+            "commission_base_percent": "20",
+            "commission_bonus_percent": "10",
+            "terms_available": True,
+        })
+    assert response.status_code == 401
+
+
+def test_invitation_route_never_auto_approves(monkeypatch):
+    monkeypatch.setenv("CORE_INGEST_KEY", "test-only-key")
+    response = TestClient(app).post(
+            "/v1/awin/discovery/invitation-triage",
+            headers={"x-core-ingest-key": "test-only-key"},
+            json={"advertiser": "World Businesses for Sale", "terms_available": True},
+        )
+    assert response.status_code == 200
+    assert response.json()["publication_ready"] is False
+    assert response.json()["membership"] == "unverified"
+
+
+def test_ingest_requires_key_without_database_access(monkeypatch):
+    monkeypatch.setenv("CORE_INGEST_KEY", "test-only-key")
+    response = TestClient(app).post(
+        "/v1/awin/discovery/invitation-ingest",
+        json={"external_event_id": "sample-001", "advertiser": "Example"},
+    )
+    assert response.status_code == 401
