@@ -496,14 +496,12 @@ def b3_financial_reconciliation():
 
 
 @app.get("/v1/public/catalog/by-need/{need_id}")
-def public_catalog_by_v2_need(need_id: str):
+def public_catalog_by_v2_need(need_id: UUID):
     """Return commercially eligible opportunities explicitly mapped to a V2 need.
 
     A V2 need is never inferred from free text. A demand must contain
     evidence.v2_need_id with the exact V2 UUID, set after verification.
     """
-    if not need_id or len(need_id) > 128 or "/" in need_id:
-        raise HTTPException(status_code=422, detail="invalid V2 need identifier")
     with db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(f"""select o.id as opportunity_id, f.name as title,
@@ -524,7 +522,7 @@ def public_catalog_by_v2_need(need_id: str):
                 and lower(coalesce(f.evidence->>'channel_permitted','false')) = 'true'
                 and f.tracking_template is not null
                 and length(trim(f.tracking_template)) > 0
-                order by o.created_at desc limit 100""", (need_id,))
+                order by o.created_at desc limit 100""", (str(need_id),))
             rows = cur.fetchall()
     return {"status":"OK","total":len(rows),"data":[
         {"id":str(row["opportunity_id"]),"title":row["title"],
