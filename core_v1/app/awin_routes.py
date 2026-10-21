@@ -433,6 +433,25 @@ def discovery_regions():
         raise HTTPException(502, "Awin regional inventory unavailable")
 
 
+def _normalized_feed_url(url: str) -> str:
+    """Apply the feed-builder compatibility fixes to every import path."""
+    from urllib.parse import quote, urlsplit, urlunsplit
+    parts = urlsplit(url)
+    if parts.scheme != "https" or parts.hostname not in {"productdata.awin.com", "ui.awin.com"} or parts.username or parts.password:
+        raise ValueError("unapproved feed host")
+    segments = parts.path.split("/")
+    filtered = []
+    i = 0
+    while i < len(segments):
+        if segments[i].lower() == "adultcontent" and i + 1 < len(segments):
+            i += 2
+            continue
+        filtered.append(segments[i])
+        i += 1
+    return urlunsplit((parts.scheme, parts.netloc,
+                      quote("/".join(filtered), safe="/%:@-._~"), parts.query, parts.fragment))
+
+
 @router.post("/import-multiple", dependencies=[Depends(_auth)])
 def import_multiple_feeds(payload: ImportRequest):
     """Ingest every configured approved-host feed as candidate inventory.
@@ -450,6 +469,7 @@ def import_multiple_feeds(payload: ImportRequest):
     legacy = os.getenv("AWIN_FEED_URL", "")
     if legacy and legacy not in urls:
         urls.insert(0, legacy)
+    urls = list(dict.fromkeys(urls))
     if not urls:
         raise HTTPException(503, "no feed sources configured")
     if not os.getenv("DATABASE_URL"):
@@ -457,11 +477,8 @@ def import_multiple_feeds(payload: ImportRequest):
     totals = {"sources": len(urls), "successful_sources": 0, "discovered": 0,
               "imported": 0, "candidates": 0, "eligible": 0, "skipped": 0}
     for url in urls:
-        parsed = urlparse(url)
-        if parsed.scheme != "https" or parsed.hostname not in {"productdata.awin.com", "ui.awin.com"}:
-            totals["skipped"] += 1
-            continue
         try:
+            url = _normalized_feed_url(url)
             req = Request(url, headers={"User-Agent": "RoboGlobalCore/1.0"})
             with urlopen(req, timeout=45) as response:
                 if urlparse(response.geturl()).hostname not in {"productdata.awin.com", "ui.awin.com"}:
@@ -490,7 +507,7 @@ def import_feed(payload: ImportRequest):
     if not os.getenv("DATABASE_URL"):
         raise HTTPException(503, "database not configured")
     try:
-        request = Request(url, headers={"User-Agent": "RoboGlobalCore/1.0"})
+        request = Request(_normalized_feed_url(url), headers={"User-Agent": "RoboGlobalCore/1.0"})
         with urlopen(request, timeout=45) as response:
             if urlparse(response.geturl()).hostname not in {"productdata.awin.com", "ui.awin.com"}:
                 raise ValueError("unexpected redirect host")
@@ -518,28 +535,7 @@ def _startup_feed_probe():
         if parsed.scheme != "https" or parsed.hostname not in {"productdata.awin.com", "ui.awin.com"}:
             raise ValueError("unapproved feed host")
         logging.getLogger("robo-global-core").warning("AWIN_PROBE url_shape host=%s path_segments=%s query_keys=%s", parsed.hostname, len([segment for segment in parsed.path.split("/") if segment]), sorted({k for k, _ in parse_qsl(parsed.query, keep_blank_values=True)}))
-        from urllib.parse import quote, urlsplit, urlunsplit
-        # Awin's feed builder can emit unescaped reserved characters in path values.
-        # Preserve structural separators, percent escapes and existing query values.
-        parts = urlsplit(url)
-        # Awin restricts adult-content filtering to UK/US/CA/IE; BR feeds must omit it.
-        segments = parts.path.split("/")
-        filtered = []
-        removed_adult_filter = False
-        i = 0
-        while i < len(segments):
-            if segments[i].lower() == "adultcontent" and i + 1 < len(segments):
-                removed_adult_filter = True
-                i += 2
-                continue
-            filtered.append(segments[i])
-            i += 1
-        if removed_adult_filter:
-            logging.getLogger("robo-global-core").warning("AWIN_PROBE removed_unsupported_adultcontent_filter=true")
-        safe_path = quote("/".join(filtered), safe="/%:@-._~")
-        if safe_path != parts.path or removed_adult_filter:
-            url = urlunsplit((parts.scheme, parts.netloc, safe_path, parts.query, parts.fragment))
-            logging.getLogger("robo-global-core").warning("AWIN_PROBE encoded_reserved_path_characters=true")
+        url = _normalized_feed_url(url)
         req = Request(url, headers={"User-Agent": "RoboGlobalCore/1.0"})
         with urlopen(req, timeout=45) as response:
             if urlparse(response.geturl()).hostname not in {"productdata.awin.com", "ui.awin.com"}:
@@ -549,10 +545,6 @@ def _startup_feed_probe():
             raise ValueError("feed too large")
         offers = parse_feed(content, compressed=content.startswith(bytes([0x1f, 0x8b])), max_rows=10000)
         logging.getLogger("robo-global-core").warning("AWIN_PROBE success candidates=%s publication_enabled=false database_writes=0", len(offers))
-        if os.getenv("AWIN_CANDIDATE_IMPORT_ON_STARTUP", "true").strip().lower() == "true" and offers:
-            with connect(os.environ["DATABASE_URL"]) as conn:
-                summary = import_offers(conn, offers, {}, reviewed_terms=set(), dry_run=False)
-            logging.getLogger("robo-global-core").warning("AWIN_CANDIDATE_IMPORT completed discovered=%s candidates=%s imported=%s publication_enabled=false", summary.discovered, summary.candidates, summary.imported)
     except HTTPError as exc:
         category = "unclassified"
         try:
