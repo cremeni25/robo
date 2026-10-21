@@ -97,7 +97,14 @@ def import_offers(conn: Any, offers: Iterable[AwinOffer], programs: dict[str, di
                 values ('AWIN',%s,%s,%s,'BR','pt-BR',%s,%s,'unknown',%s::jsonb,%s,'none')
                 on conflict (platform,external_product_id) where external_product_id is not null
                 do update set name=excluded.name,affiliate_url=excluded.affiliate_url,
-                currency=excluded.currency,price=excluded.price,evidence=excluded.evidence,
+                currency=excluded.currency,price=excluded.price,
+                evidence=excluded.evidence || case
+                    when {schema}.offers.evidence->>'membership_check_source'='awin_publisher_programmes_joined'
+                    then jsonb_build_object(
+                        'membership_status',{schema}.offers.evidence->'membership_status',
+                        'membership_checked_at',{schema}.offers.evidence->'membership_checked_at',
+                        'membership_check_source',{schema}.offers.evidence->'membership_check_source')
+                    else '{{}}'::jsonb end,
                 status=case when {schema}.offers.status in ('active','paused') then {schema}.offers.status
                             else excluded.status end,
                 updated_at=now()
