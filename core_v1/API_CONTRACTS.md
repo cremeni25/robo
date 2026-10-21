@@ -89,3 +89,10 @@ A successful HTTP response, deployment or database write is not evidence of mone
 The operational proof remains:
 
 `real demand -> real asset/distribution -> tracked redirect -> platform conversion -> real commission -> correct attribution -> learning`
+
+
+### Recurring candidate acquisition
+
+All Awin feed imports use the same approved-host URL normalization. Duplicate configured URLs are imported once per cycle. The startup probe is read-only; the acquisition scheduler performs the immediate import and subsequent six-hour cycles while the service is running. Free-service sleep can delay cycles; this is not a guaranteed cron. Imports retain candidate status and do not approve programme terms, channels, tracking or publication. Official membership evidence is preserved independently of feed updates.
+
+Regression validation: 25 Core tests passed on 2026-10-21, including recurring feed normalization, source deduplication and publication gating. Runtime import success must be checked separately in ACQUISITION_IMPORT logs.
