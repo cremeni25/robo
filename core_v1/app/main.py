@@ -502,7 +502,9 @@ def public_catalog_by_v2_need(need_id: str):
     A V2 need is never inferred from free text. A demand must contain
     evidence.v2_need_id with the exact V2 UUID, set after verification.
     """
-    if not need_id or len(need_id) > 128 or "/" in need_id:\n        raise HTTPException(status_code=422, detail="invalid V2 need identifier")\n    with db_connection() as conn:
+    if not need_id or len(need_id) > 128 or "/" in need_id:
+        raise HTTPException(status_code=422, detail="invalid V2 need identifier")
+    with db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(f"""select o.id as opportunity_id, f.name as title,
                 f.platform as provider, o.market, o.language,
