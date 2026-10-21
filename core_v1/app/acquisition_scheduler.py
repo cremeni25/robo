@@ -15,7 +15,27 @@ _started = False
 _lock = threading.Lock()
 
 
+
+def _run_monetizze_cycle() -> None:
+    key = os.getenv("MONETIZZE_CONSUMER_KEY", "").strip()
+    if not key:
+        logger.warning("MONETIZZE_CATALOG_SKIPPED reason=consumer_key_not_configured publication_changed=false")
+        return
+    try:
+        from psycopg import connect
+        from core_v1.app.monetizze_catalog import MonetizzeCatalogClient, record_catalog
+        records = MonetizzeCatalogClient(key).products()
+        with connect(os.environ["DATABASE_URL"]) as conn:
+            inserted = record_catalog(conn, records)
+        logger.warning("MONETIZZE_CATALOG completed products=%s new_snapshots=%s publication_changed=false",
+                       len(records), inserted)
+    except Exception as exc:
+        logger.warning("MONETIZZE_CATALOG_FAILED category=%s publication_changed=false",
+                       type(exc).__name__)
+
+
 def _run_cycle() -> None:
+    _run_monetizze_cycle()
     from core_v1.app.awin import AwinClient
     from core_v1.app.awin_routes import ImportRequest, import_multiple_feeds
 
