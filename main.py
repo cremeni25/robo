@@ -2143,3 +2143,20 @@ def anunciantes_awin_master(request: Request):
         return discover()
     except (HTTPError, URLError, TimeoutError, ValueError):
         raise HTTPException(status_code=503, detail="Consulta Awin indisponivel")
+
+# Private deployment diagnostics: presence only, never credential values.
+@app.on_event("startup")
+def log_affiliate_configuration_presence():
+    for platform in ("HOTMART", "EDUZZ", "MONETIZZE"):
+        prefix = platform + "_"
+        configured_names = sorted(
+            name for name in os.environ
+            if name.startswith(prefix) and bool(os.environ.get(name, "").strip())
+            and name.replace("_", "").isalnum()
+        )
+        log("AFFILIATE_CONFIG", "INFO", json.dumps({
+            "platform": platform,
+            "configured_variable_names": configured_names,
+            "credential_values_disclosed": False,
+            "catalog_access_verified": False,
+        }, sort_keys=True))
